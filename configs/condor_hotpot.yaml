@@ -1,0 +1,211 @@
+# condor_hotpot.yaml
+# Full Hydra config for CONDOR training on HotpotQA.
+#
+# Differs from condor_nq.yaml in:
+#   - data.train_files / val_files → HotpotQA parquet paths
+#   - wandb project / experiment names
+#   - condor.budget_lo raised (multi-hop queries are naturally more expensive)
+#   - condor.l0_reward_threshold lowered (multi-hop is harder; be less strict)
+
+defaults:
+  - paths
+  - _self_
+
+wandb:
+  project: verl_condor_hotpot
+  experiment: condor_qwen2.5_1.5b_hotpot
+
+data:
+  train_files:            ["${paths.hotpot_qa.train}"]
+  val_files:              ["${paths.hotpot_qa.test}"]
+  train_batch_size:       96
+  val_batch_size:         96
+  max_prompt_length:      1024
+  max_response_length:    16
+  filter_overlong_prompts: false
+  truncation:             right
+  return_raw_chat:        true
+  return_full_prompt:     false
+  shuffle:                true
+  prompt_key:             prompt
+  reward_fn_key:          data_source
+  return_raw_input_ids:   false
+  filter_overlong_prompts_workers: 1
+  trust_remote_code:      false
+  image_key:              images
+  video_key:              videos
+  custom_cls:
+    path: null
+    name: null
+
+actor_rollout_ref:
+  hybrid_engine: true
+  model:
+    path:                         "${paths.sft_checkpoint}"
+    enable_gradient_checkpointing: false
+    enable_activation_offload:    false
+    use_remove_padding:           false
+    lora_rank:                    0
+    lora_alpha:                   16
+    target_modules:               all-linear
+    use_liger:                    false
+    use_fused_kernels:            false
+    trust_remote_code:            false
+    external_lib:                 null
+    override_config:              {}
+    use_shm:                      false
+  actor:
+    strategy:                     fsdp
+    ppo_mini_batch_size:          96
+    ppo_micro_batch_size:         null
+    ppo_micro_batch_size_per_gpu: 4
+    use_dynamic_bsz:              false
+    ppo_max_token_len_per_gpu:    16384
+    grad_clip:                    1.0
+    clip_ratio:                   0.2
+    clip_ratio_low:               0.2
+    clip_ratio_high:              0.2
+    clip_ratio_c:                 3.0
+    loss_agg_mode:                token-mean
+    entropy_coeff:                0
+    use_kl_loss:                  false
+    use_torch_compile:            true
+    kl_loss_coef:                 0.01
+    kl_loss_type:                 low_var_kl
+    ppo_epochs:                   1
+    shuffle:                      false
+    ulysses_sequence_parallel_size: 1
+    checkpoint:
+      contents: [model, optimizer, extra]
+    optim:
+      lr:                       3.0e-7
+      lr_warmup_steps:          -1
+      lr_warmup_steps_ratio:    0.0
+      min_lr_ratio:             0.0
+      num_cycles:               0.5
+      warmup_style:             constant
+      total_training_steps:     -1
+      weight_decay:             0.01
+    fsdp_config:
+      wrap_policy:
+        min_num_params: 0
+      param_offload:    false
+      optimizer_offload: false
+  rollout:
+    name:                               vllm
+    temperature:                        1.0
+    top_k:                              -1
+    top_p:                              1.0
+    prompt_length:                      null
+    response_length:                    null
+    log_prob_micro_batch_size:          null
+    log_prob_micro_batch_size_per_gpu:  4
+    tensor_model_parallel_size:         2
+    gpu_memory_utilization:             0.7
+    ignore_eos:                         false
+    enforce_eager:                      false
+    free_cache_engine:                  true
+    load_format:                        dummy_dtensor
+    layered_summon:                     false
+    n:                                  1
+    multi_turn:
+      enable: true
+      format: chatml
+      max_assistant_turns: 5
+  ref:
+    log_prob_micro_batch_size:          null
+    log_prob_micro_batch_size_per_gpu:  4
+    fsdp_config:
+      param_offload: false
+
+critic:
+  strategy:   fsdp
+  optim:
+    lr:                       1.0e-5
+    lr_warmup_steps:          -1
+    lr_warmup_steps_ratio:    0.0
+    min_lr_ratio:             0.0
+    num_cycles:               0.5
+    warmup_style:             constant
+    total_training_steps:     -1
+    weight_decay:             0.01
+  model:
+    path:                         "${paths.sft_checkpoint}"
+    enable_gradient_checkpointing: false
+    enable_activation_offload:    false
+    use_remove_padding:           false
+    lora_rank:                    0
+    lora_alpha:                   16
+    target_modules:               all-linear
+    use_liger:                    false
+    use_fused_kernels:            false
+    trust_remote_code:            false
+    external_lib:                 null
+    override_config:              {}
+    use_shm:                      false
+  ppo_micro_batch_size:         null
+  ppo_micro_batch_size_per_gpu: 4
+  ppo_max_token_len_per_gpu:    32768
+  forward_micro_batch_size_per_gpu: 4
+  use_dynamic_bsz:              false
+  grad_clip:                    1.0
+  ppo_epochs:                   1
+  shuffle:                      false
+  ulysses_sequence_parallel_size: 1
+  cliprange_value:              0.5
+  loss_agg_mode:                token-mean
+  checkpoint:
+    contents: [model, optimizer, extra]
+  fsdp_config:
+    wrap_policy:
+      min_num_params: 0
+    param_offload:    false
+    optimizer_offload: false
+
+algorithm:
+  adv_estimator:          gae
+  gamma:                  1.0
+  lam:                    0.95
+  use_kl_in_reward:       true
+  kl_penalty:             kl
+  norm_adv_by_std_in_grpo: true
+  use_pf_ppo:             false
+  pf_ppo:
+    reweight_method: pow
+    weight_pow:      2.0
+
+trainer:
+  total_epochs:     1
+  n_gpus_per_node:  6
+  nnodes:           1
+  save_freq:        25
+  test_freq:        25
+  critic_warmup:    0
+  val_before_train: true
+  val_only:         false
+  balance_batch:    false
+  logger:           [wandb]
+  project_name:     "${wandb.project}"
+  experiment_name:  "${wandb.experiment}"
+  log_dir:          "${paths.logs_dir}"
+  metrics_dir:      "${paths.metrics_dir}"
+  plots_dir:        "${paths.plots_dir}"
+  checkpoint_dir:   "${paths.rl_checkpoint_dir}"
+
+condor:
+  use_condor: true
+  epsilon_start:    0.9
+  epsilon_end:      0.1
+  epsilon_decay:    1000
+  router_lr:        1.0e-3
+  reinforce_gamma:  0.99
+  lambda_hi_init:   0.1
+  lambda_lo_init:   0.0
+  budget_hi:        0.5
+  budget_lo:        0.5     # higher: multi-hop is more expensive
+  dual_alpha_lr:    1.0e-3
+  phi_t_warmup:     500
+  phi_tau_trans:    100.0
+  phi_lr:           1.0e-3
+  l0_reward_threshold: 0.3  # lower: multi-hop F1 is harder to hit
+  cluster_report_freq: 50

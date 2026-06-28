@@ -1,0 +1,53 @@
+# eval_condor_nq.yaml
+# Hydra config for standalone CONDOR evaluation on Natural Questions (NQ).
+#
+# Usage
+#   python -m verl.trainer.main_eval_condor \
+#       --config-path /home/jgibson2/projects/adaptive_rag/configs \
+#       --config-name eval_condor_nq \
+#       "eval.checkpoint_path=/data/user_data/jgibson2/condor/checkpoints/<id>"
+
+defaults:
+  - paths
+  - _self_
+
+wandb:
+  project: verl_condor_nq_eval
+  experiment: condor_eval_nq
+
+data:
+  val_files:    ["${paths.nq.test}"]
+  val_dataset:  nq
+  val_batch_size: 32
+  max_prompt_length: 1024
+  max_response_length: 16
+  prompt_key: prompt
+  trust_remote_code: false
+
+# ── Eval-specific ──────────────────────────────────────────────────────────────
+eval:
+  checkpoint_path: "${paths.rl_checkpoint_dir}/latest"
+  router_checkpoint: null    # path to router policy .pt; null = random (epsilon=0 → prior-based)
+  max_turn: 5
+  eval_batch_size: 8         # mini-batch size for memory management
+
+# ── Trainer (output dirs only) ────────────────────────────────────────────────
+trainer:
+  project_name:     "${wandb.project}"
+  experiment_name:  "${wandb.experiment}"
+  logger:           [wandb]
+  n_gpus_per_node:  1
+  nnodes:           1
+  ray_num_cpus:     null
+  log_dir:          "${paths.logs_dir}"
+  metrics_dir:      "${paths.metrics_dir}"
+  plots_dir:        "${paths.plots_dir}"
+  checkpoint_dir:   "${paths.rl_checkpoint_dir}"
+
+# ── CONDOR (router behaviour during eval) ────────────────────────────────────
+condor:
+  use_condor: true
+  l0_reward_threshold: 0.4
+  epsilon_start: 0.0         # pure exploitation
+  epsilon_end:   0.0
+  epsilon_decay: 1.0

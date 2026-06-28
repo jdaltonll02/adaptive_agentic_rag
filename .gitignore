@@ -1,0 +1,97 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+wheels/
+*.so
+*.dylib
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+conda-meta/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+
+# Type checkers
+.mypy_cache/
+.pytype/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Hydra / OmegaConf outputs
+outputs/
+multirun/
+.hydra/
+
+# Weights & Biases
+wandb/
+
+# Ray
+/tmp/ray/
+
+# Model weights and large binaries
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.npy
+*.npz
+
+# Data files (managed externally — do not commit parquet/json dumps)
+*.parquet
+*.arrow
+*.jsonl.gz
+data/*.json
+data/*.csv
+
+# Logs
+*.log
+logs/
+slurm_logs/
+*.out
+*.err
+
+# Metrics and plots (generated artefacts — regenerate from checkpoints)
+outputs/metrics/
+outputs/plots/
+
+# Secrets and credentials
+.env
+*.env.*
+secrets.yaml
+api_keys.yaml
+google_credentials.json
+wandb_key.txt
+
+# Project-specific large directories (stored in /data/user_data/jgibson2/)
+checkpoints/
+condor_data/
