@@ -54,7 +54,7 @@ from verl.utils.fs import copy_local_path_from_hdfs
 from verl.workers.fsdp_workers import ActorRolloutRefWorker, CriticWorker
 from verl.utils.ray_utils import RoleEnum as Role
 from verl.single_controller.ray import RayClassWithInitArgs, RayWorkerGroup
-from verl.single_controller.ray.base import RayResourcePool
+from verl.trainer.ppo.ray_trainer_agentic_rag_2 import ResourcePoolManager
 
 # CONDOR trainer
 from verl.trainer.ppo.ray_trainer_condor import CONDORRayPPOTrainer, CONDORRewardManager  # noqa: E402
@@ -142,11 +142,9 @@ def main(config: DictConfig) -> None:
     if config.trainer.get('use_reference_policy', False):
         mapping[Role.RefPolicy] = global_pool_id
 
-    resource_pool_manager = RayResourcePool(
-        process_on_nodes=resource_pool_spec,
-        use_gpu=True,
-        max_colocate_count=1,
-        ray_cls_with_init=RayClassWithInitArgs(cls=ray.remote(num_gpus=0)(lambda: None)),
+    resource_pool_manager = ResourcePoolManager(
+        resource_pool_spec=resource_pool_spec,
+        mapping=mapping,
     )
 
     role_worker_mapping = {

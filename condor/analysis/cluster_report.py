@@ -1,14 +1,14 @@
 """2×2 failure taxonomy via K-Means on CONDOR trajectory features.
 
-Cluster axes:
-  x: cost efficiency   (low cost vs high cost)
-  y: answer quality    (low F1  vs high F1)
+Cluster axes (matching spec Section 4):
+  x: L0 routing accuracy  (L0acc <= 0.7  vs  L0acc > 0.7)
+  y: answer quality        (F1   <= 0.6   vs  F1   > 0.6)
 
-Resulting taxonomy labels:
-  efficient_correct    – ideal: cheap and accurate
-  efficient_incorrect  – wrong mechanism but cheap; explore harder
-  expensive_correct    – accurate but over-budget; optimise L1
-  expensive_incorrect  – worst case; mechanism and workflow both failing
+Taxonomy labels (fixed thresholds F1>0.6, L0acc>0.7):
+  success_l0_l1_correct   – L0 and L1 both correct
+  l1_workflow_failure      – L0 correct but L1 workflow failed
+  l0_wrong_l1_recovered    – L0 wrong, L1 recovered anyway
+  systemic_failure         – both L0 and L1 wrong
 """
 
 from typing import Dict, Optional
@@ -65,26 +65,23 @@ class ClusterReport:
                 report[f'cluster_{k}'] = {'taxonomy': 'empty', 'size': 0}
                 continue
 
+            avg_l0 = float(cluster[:, 0].mean())   # L0 routing accuracy
             avg_f1 = float(cluster[:, 1].mean())
             avg_cost = float(cluster[:, 2].mean())
-            avg_l0 = float(cluster[:, 0].mean())
             avg_turns = float(cluster[:, 3].mean())
 
-            # Global medians as thresholds
-            f1_thresh = float(raw[:, 1].median()) if hasattr(raw[:, 1], 'median') else float(np.median(raw[:, 1]))
-            cost_thresh = float(raw[:, 2].median()) if hasattr(raw[:, 2], 'median') else float(np.median(raw[:, 2]))
+            # Fixed thresholds from spec (Section 4 / Algorithm 2)
+            high_f1 = avg_f1 > 0.6
+            high_l0 = avg_l0 > 0.7
 
-            high_f1 = avg_f1 >= f1_thresh
-            high_cost = avg_cost >= cost_thresh
-
-            if high_f1 and not high_cost:
-                taxonomy = 'efficient_correct'
-            elif high_f1 and high_cost:
-                taxonomy = 'expensive_correct'
-            elif not high_f1 and not high_cost:
-                taxonomy = 'efficient_incorrect'
+            if high_f1 and high_l0:
+                taxonomy = 'success_l0_l1_correct'
+            elif high_l0 and not high_f1:
+                taxonomy = 'l1_workflow_failure'
+            elif high_f1 and not high_l0:
+                taxonomy = 'l0_wrong_l1_recovered'
             else:
-                taxonomy = 'expensive_incorrect'
+                taxonomy = 'systemic_failure'
 
             report[f'cluster_{k}'] = {
                 'taxonomy': taxonomy,

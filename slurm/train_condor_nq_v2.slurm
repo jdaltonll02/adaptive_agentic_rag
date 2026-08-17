@@ -1,18 +1,15 @@
 #!/bin/bash
-#SBATCH --job-name=condor_nq
+#SBATCH --job-name=condor_nq_v2
 #SBATCH --partition=general
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:A100_80GB:3
-#SBATCH --constraint="A100_80GB|A100_80G"
+#SBATCH --gres=gpu:L40S:3
 #SBATCH --mem=400G
-#SBATCH --exclude=babel-w5-24,babel-v5-20
 #SBATCH --time=48:00:00
-#SBATCH --qos=normal
-#SBATCH --output=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_condor_nq.out
-#SBATCH --error=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_condor_nq.err
-#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --output=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_condor_nq_v2.out
+#SBATCH --error=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_condor_nq_v2.err
+#SBATCH --mail-type=FAIL
 #SBATCH --mail-user=dalton.edu02@gmail.com
 
 # ── Environment ───────────────────────────────────────────────────────────────
@@ -36,8 +33,13 @@ export PYTHONUNBUFFERED=1
 export VLLM_LOGGING_LEVEL=INFO
 export VLLM_ENABLE_V1_MULTIPROCESSING=0
 GPU_TYPE=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
-echo "[SLURM] GPU: ${GPU_TYPE}  →  gpu_memory_utilization=0.4"
-GMU=0.4
+VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+VRAM_GB=$(( VRAM_MB / 1024 ))
+if   [ "${VRAM_GB}" -ge 70 ]; then GMU=0.40   # A100_80GB / H100 80GB
+elif [ "${VRAM_GB}" -ge 40 ]; then GMU=0.85   # L40S 44GB / A100_40GB / A6000 48GB
+else                                GMU=0.85   # smaller GPU
+fi
+echo "[SLURM] GPU: ${GPU_TYPE}  VRAM: ${VRAM_GB}GB  →  gpu_memory_utilization=${GMU}"
 
 # Use a job-specific Ray temp dir to avoid permission conflicts with stale /tmp/ray files
 export RAY_TMPDIR=/tmp/ray_${SLURM_JOB_ID}
@@ -144,26 +146,26 @@ fi
 export OPENAI_API_BASE="http://localhost:8001/v1"
 export OPENAI_API_KEY="local"
 
-# Restrict training to GPUs 0,1 only
+# Restrict training to GPUs 0,1; GPU 2 is the executor
 export CUDA_VISIBLE_DEVICES=0,1
 
 echo "[SLURM] Job ID        : ${SLURM_JOB_ID}"
 echo "[SLURM] Node          : $(hostname)"
 echo "[SLURM] Training GPUs : ${CUDA_VISIBLE_DEVICES}"
-echo "[SLURM] Config        : condor_nq"
+echo "[SLURM] Config        : condor_nq_v2"
 echo "[SLURM] Start time    : $(date)"
 
 # ── Add timestamp suffix to experiment name to avoid W&B collisions ───────────
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-EXPERIMENT_NAME="condor_qwen2.5_7b_nq_${SLURM_JOB_ID}_${TIMESTAMP}"
+EXPERIMENT_NAME="condor_qwen2.5_7b_nq_v2_${SLURM_JOB_ID}_${TIMESTAMP}"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 cd ${PROJECT_ROOT}
 
 python -m verl.trainer.main_ppo_condor \
     --config-path "${PROJECT_ROOT}/configs" \
-    --config-name  condor_nq \
-    "wandb.project=verl_condor_nq" \
+    --config-name  condor_nq_v2 \
+    "wandb.project=verl_condor_nq_v2" \
     "wandb.experiment=${EXPERIMENT_NAME}" \
     "paths.sft_checkpoint=${LOCAL_7B}" \
     "actor_rollout_ref.rollout.gpu_memory_utilization=${GMU}" \

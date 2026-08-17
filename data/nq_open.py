@@ -11,10 +11,9 @@ Backward compatible: all existing baseline fields are preserved.
 
 Usage
 -----
-    # Generate NQ train parquet from aqawflow data (run once before training):
     python -m data.nq_open \\
-        --train-json /data/user_data/jgibson2/aqawflow/data/nq/nq_train_questions_and_answers.json \\
-        --test-json  /data/user_data/jgibson2/aqawflow/data/nq/nq_test_questions_and_answers.json \\
+        --train-json /data/user_data/jgibson2/condor/data/nq/nq_train_questions_and_answers.json \\
+        --test-json  /data/user_data/jgibson2/condor/data/nq/nq_test_questions_and_answers.json \\
         --local-dir  /data/user_data/jgibson2/condor/data/nq
 """
 
@@ -83,20 +82,19 @@ def build_dataset(json_path: str, split: str, data_source: str = 'google-researc
 
 
 if __name__ == '__main__':
-    _AQAWFLOW = '/data/user_data/jgibson2/aqawflow/data/nq'
     _CONDOR_DATA = '/data/user_data/jgibson2/condor/data/nq'
 
     parser = argparse.ArgumentParser(description='Prepare NQ parquet files for CONDOR training.')
     parser.add_argument('--train-json',
-                        default=os.path.join(_AQAWFLOW, 'nq_train_questions_and_answers.json'),
-                        help='Path to NQ train JSON (default: aqawflow data dir)')
+                        default=os.path.join(_CONDOR_DATA, 'nq_train_questions_and_answers.json'),
+                        help='Path to NQ train JSON')
     parser.add_argument('--test-json',
-                        default=os.path.join(_AQAWFLOW, 'nq_test_questions_and_answers.json'),
-                        help='Path to NQ test JSON (default: aqawflow data dir)')
+                        default=os.path.join(_CONDOR_DATA, 'nq_test_questions_and_answers.json'),
+                        help='Path to NQ test JSON')
     parser.add_argument('--local-dir', default=_CONDOR_DATA,
                         help='Output directory for parquet files')
     parser.add_argument('--skip-test', action='store_true',
-                        help='Skip test split (test_996.parquet already in aqawflow)')
+                        help='Skip test split generation')
     parser.add_argument('--limit', type=int, default=None,
                         help='Limit number of training examples (None = all)')
     args = parser.parse_args()
@@ -118,6 +116,6 @@ if __name__ == '__main__':
         test_dataset.to_parquet(test_out)
         print(f'[nq_open] Test parquet  ({len(test_dataset)} rows) → {test_out}')
     else:
-        print('[nq_open] Skipping test split (use aqawflow test_996.parquet directly).')
+        print('[nq_open] Skipping test split.')
 
     print('[nq_open] Done.')

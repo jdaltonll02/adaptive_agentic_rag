@@ -1,7 +1,7 @@
 # eval_condor_bamboogle.yaml — evaluation on Bamboogle
 
 defaults:
-  - paths
+  - condor_nq
   - _self_
 
 wandb:
@@ -41,3 +41,14 @@ condor:
   epsilon_start: 0.0
   epsilon_end:   0.0
   epsilon_decay: 1.0
+
+# ── Eval-mode overrides (applied on top of condor_nq base) ────────────────────
+trainer:
+  val_only: true
+  val_before_train: true
+  n_gpus_per_node: 1
+  total_epochs: 1
+
+actor_rollout_ref:
+  rollout:
+    tensor_model_parallel_size: 1

@@ -49,13 +49,27 @@ MECHANISM_SELECTION_COST = {
 
 QTYPE_LABELS = {0: 'factoid', 1: 'multi_hop', 2: 'comparison', 3: 'complex'}
 
-# Rule-based prior P(m | qtype)  – sums to 1.0
-_RULE_BASED_PRIOR = {
-    'factoid':    np.array([0.15, 0.50, 0.10, 0.15, 0.10], dtype=np.float32),
-    'multi_hop':  np.array([0.05, 0.10, 0.40, 0.30, 0.15], dtype=np.float32),
-    'comparison': np.array([0.05, 0.15, 0.30, 0.35, 0.15], dtype=np.float32),
-    'complex':    np.array([0.05, 0.10, 0.25, 0.20, 0.40], dtype=np.float32),
-}
+# Rule-based prior P(m | query) — spec Eq. 20.
+# Resolved from raw query-text surface features, not qtype labels.
+# Prior(m | q) given as [m0_Pure_LLM, m1_Std_RAG, m2_Adv_RAG, m3_Graph_RAG, m4_Web_RAG]
+_TEMPORAL_KWS  = {'current', 'today', '2024', '2025', 'latest', 'now'}
+_RELATIONAL_KWS = {'connected', 'related', 'between', 'relationship'}
+
+
+def _rule_based_prior_from_text(question: str) -> np.ndarray:
+    """Return P(m|q) as a 5-element array using spec Eq. 20 surface rules."""
+    q = question.lower()
+    words = set(q.split())
+    temporal  = bool(_TEMPORAL_KWS & words)
+    relational = bool(_RELATIONAL_KWS & words)
+    short     = len(question.split()) < 9
+    if temporal:
+        return np.array([0.05, 0.10, 0.15, 0.15, 0.55], dtype=np.float32)
+    if relational:
+        return np.array([0.05, 0.15, 0.20, 0.55, 0.05], dtype=np.float32)
+    if short:
+        return np.array([0.65, 0.20, 0.08, 0.04, 0.03], dtype=np.float32)
+    return np.array([0.10, 0.35, 0.35, 0.10, 0.10], dtype=np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -151,11 +165,13 @@ class MechanismRouter:
         epsilon_end: float = 0.1,
         epsilon_decay: float = 1000.0,
         lr: float = 1e-3,
+        gamma: float = 0.99,
         use_condor: bool = True,
     ):
         self.epsilon_start = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
+        self.gamma = gamma
         self.use_condor = use_condor
         self._step = 0
 
@@ -183,16 +199,14 @@ class MechanismRouter:
             return 1, 0, np.zeros(32, dtype=np.float32)
 
         qtype_id = classify_qtype(question)
-        qtype_label = QTYPE_LABELS[qtype_id]
         features = query_to_features(question)
 
         x = torch.FloatTensor(features).unsqueeze(0)
         with torch.no_grad():
             logits = self._policy(x)
-        log_probs_t = torch.log_softmax(logits, dim=-1)
 
         if np.random.random() < self.epsilon:
-            prior = _RULE_BASED_PRIOR[qtype_label].copy()
+            prior = _rule_based_prior_from_text(question)
             prior /= prior.sum()
             m_star = int(np.random.choice(5, p=prior))
         else:

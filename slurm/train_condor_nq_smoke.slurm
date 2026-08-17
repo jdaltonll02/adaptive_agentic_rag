@@ -1,17 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=condor_nq
+#SBATCH --job-name=condor_nq_smoke
 #SBATCH --partition=general
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:A100_80GB:3
 #SBATCH --constraint="A100_80GB|A100_80G"
 #SBATCH --mem=400G
-#SBATCH --exclude=babel-w5-24,babel-v5-20
-#SBATCH --time=48:00:00
-#SBATCH --qos=normal
-#SBATCH --output=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_condor_nq.out
-#SBATCH --error=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_condor_nq.err
+#SBATCH --exclude=babel-w5-24
+#SBATCH --time=4:00:00
+#SBATCH --output=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_condor_nq_smoke.out
+#SBATCH --error=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_condor_nq_smoke.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=dalton.edu02@gmail.com
 
@@ -25,27 +24,34 @@ export PYTHONPATH="${PROJECT_ROOT}:${BASELINE_ROOT}:${PYTHONPATH:-}"
 
 export TOKENIZERS_PARALLELISM=true
 # GPUs 0,1 → training (FSDP actor/rollout/ref/critic)
-# GPU  2   → local executor vLLM server (no rate limits)
+# GPU  2   → local executor vLLM server
 export CUDA_VISIBLE_DEVICES=0,1,2
-# Disable torch.compile globally: prevents triton 3.2.0 PY_SSIZE_T_CLEAN crash on Python 3.12.
+# Disable torch.compile: prevents triton 3.2.0 PY_SSIZE_T_CLEAN crash on Python 3.12.
 export TORCHDYNAMO_DISABLE=1
+# Disable flash_attn Triton cross-entropy kernel — falls back to pure PyTorch.
 export DISABLE_FLASH_ATTN_TRITON_CE=1
-# NOTE: PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True is intentionally NOT set.
-# It conflicts with NCCL's internal cudaMalloc during FSDP sync_module_states BROADCAST.
+# Flush Python stdout immediately so SLURM log reflects real-time progress
 export PYTHONUNBUFFERED=1
-export VLLM_LOGGING_LEVEL=INFO
-export VLLM_ENABLE_V1_MULTIPROCESSING=0
+# NOTE: PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True is intentionally NOT set here.
+# With CPUOffload(True) on the ref model, FSDP must temporarily move CPU params to GPU
+# for the sync_module_states NCCL BROADCAST. Expandable segments conflict with NCCL's
+# internal cudaMalloc calls, causing rank 0 to fail silently and rank 1 to time out.
+# Targets 48-80 GiB GPUs. GMU is set per-GPU-type below:
+#   A100_80GB/H100: GMU=0.4 → 32 GiB vLLM budget (plenty of headroom)
+#   L40S/L40/A6000/RTX_PRO_6000: GMU=0.6 → 28.8 GiB vLLM budget (tight but sufficient)
+# After sleep(), vLLM weights+KV return to CuMem pool for FSDP Adam state init.
 GPU_TYPE=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
 echo "[SLURM] GPU: ${GPU_TYPE}  →  gpu_memory_utilization=0.4"
 GMU=0.4
+# Show "Sleep mode freed X GiB" log from vLLM workers in Ray's logs.
+export VLLM_LOGGING_LEVEL=INFO
+# external_launcher sets this to 0 automatically (vllm/config.py:1726), but be explicit.
+export VLLM_ENABLE_V1_MULTIPROCESSING=0
 
-# Use a job-specific Ray temp dir to avoid permission conflicts with stale /tmp/ray files
+# Job-specific Ray temp dir to avoid stale /tmp/ray permission conflicts
 export RAY_TMPDIR=/tmp/ray_${SLURM_JOB_ID}
 mkdir -p ${RAY_TMPDIR}
-# Clear stale Ray / torch caches from previous jobs on this node
-rm -rf /tmp/ray /tmp/torchinductor_${USER} /tmp/triton_${USER}
-# Give Ray's GCS more time to start on a busy node
-export RAY_wait_register_center_timeout=600
+rm -rf /tmp/torchinductor_${USER} /tmp/triton_${USER}
 
 # ── Cache 7B planner checkpoint to local NVMe ─────────────────────────────────
 # The same 7B checkpoint is loaded 3× (actor, ref, critic). NFS is intermittently
@@ -58,28 +64,13 @@ mkdir -p "${LOCAL_7B}"
 rsync -a --info=progress2 "${NFS_7B}/" "${LOCAL_7B}/"
 echo "[SLURM] 7B checkpoint cached locally ($(du -sh ${LOCAL_7B} | cut -f1))"
 
-# ── Cache retriever index to local NVMe ──────────────────────────────────────
-# The 64 GB FAISS index + 7.5 GB TSV live on NFS. On a busy node NFS reads
-# stall and the server never becomes ready (root cause of job 9316955 failure).
-# Copy both files to local NVMe once, then point RETRIEVER_ROOT at the copy.
-NFS_RETRIEVER=/data/user_data/jgibson2/condor/retriever
-LOCAL_RETRIEVER=/tmp/${SLURM_JOB_ID}_retriever
-echo "[SLURM] Copying retriever index to local NVMe: ${LOCAL_RETRIEVER}"
-mkdir -p "${LOCAL_RETRIEVER}"
-rsync -a --info=progress2 \
-    "${NFS_RETRIEVER}/wikipedia.e5" \
-    "${NFS_RETRIEVER}/psgs_w100.tsv" \
-    "${NFS_RETRIEVER}/intfloat" \
-    "${LOCAL_RETRIEVER}/"
-echo "[SLURM] Retriever cached locally ($(du -sh ${LOCAL_RETRIEVER} | cut -f1))"
-
 # ── Retrieval server ──────────────────────────────────────────────────────────
-export RETRIEVER_ROOT=${LOCAL_RETRIEVER}
+export RETRIEVER_ROOT=/data/user_data/jgibson2/condor/retriever
 RETRIEVAL_LOG=${PROJECT_ROOT}/log/slurm_logs/${SLURM_JOB_ID}_retrieval_server.log
 
 python ${PROJECT_ROOT}/scripts/start_retrieval_server.py > ${RETRIEVAL_LOG} 2>&1 &
 RETRIEVAL_PID=$!
-trap "kill ${RETRIEVAL_PID} ${EXECUTOR_PID} 2>/dev/null; rm -rf ${LOCAL_7B} ${LOCAL_RETRIEVER}" EXIT
+trap "kill ${RETRIEVAL_PID} ${EXECUTOR_PID} 2>/dev/null; rm -rf ${LOCAL_7B}" EXIT
 
 echo "[SLURM] Retrieval server PID: ${RETRIEVAL_PID}  (log: ${RETRIEVAL_LOG})"
 echo "[SLURM] Waiting for retrieval server on port 8000 (FAISS index load ~25 min)..."
@@ -102,9 +93,7 @@ if [ ${RETRIEVAL_READY} -eq 0 ]; then
 fi
 
 # ── Local executor vLLM server (GPU 2, port 8001) ─────────────────────────────
-# Executor: Qwen2.5-14B-Instruct (frozen, stronger tool-call quality than 7B)
-# Planner:  Qwen2.5-7B-Instruct  (trained via PPO on GPUs 0+1)
-# 14B in bfloat16 ≈ 28GB weights; A100_80GB leaves ~44GB for KV cache — comfortable.
+# Executor: Qwen2.5-14B-Instruct (frozen); Planner: Qwen2.5-7B-Instruct (trained)
 EXECUTOR_CKPT=/data/user_data/jgibson2/condor/checkpoints/sft/qwen2.5_14b_instruct
 EXECUTOR_LOG=${PROJECT_ROOT}/log/slurm_logs/${SLURM_JOB_ID}_executor_vllm.log
 
@@ -122,11 +111,9 @@ EXECUTOR_PID=$!
 
 echo "[SLURM] Executor vLLM PID: ${EXECUTOR_PID}  (log: ${EXECUTOR_LOG})"
 echo "[SLURM] Waiting for executor vLLM server on port 8001 (model fully loaded)..."
-EXECUTOR_READY=0
 for i in $(seq 1 240); do
     if curl -sf http://localhost:8001/v1/models > /dev/null 2>&1; then
         echo "[SLURM] Executor vLLM server ready (${i}s)"
-        EXECUTOR_READY=1
         break
     fi
     if ! kill -0 ${EXECUTOR_PID} 2>/dev/null; then
@@ -135,43 +122,61 @@ for i in $(seq 1 240); do
     fi
     sleep 5
 done
-if [ ${EXECUTOR_READY} -eq 0 ]; then
-    echo "[SLURM] ERROR: Executor vLLM server did not become ready within 1200s. Check ${EXECUTOR_LOG}"
-    exit 1
-fi
 
-# Point executor agents at local vLLM — no rate limits, no external API
+# Point executor agents at local vLLM
 export OPENAI_API_BASE="http://localhost:8001/v1"
 export OPENAI_API_KEY="local"
 
 # Restrict training to GPUs 0,1 only
 export CUDA_VISIBLE_DEVICES=0,1
 
+echo "[SLURM] ============================================================"
+echo "[SLURM] SMOKE TEST — 3 training steps, batch_size=16"
 echo "[SLURM] Job ID        : ${SLURM_JOB_ID}"
 echo "[SLURM] Node          : $(hostname)"
 echo "[SLURM] Training GPUs : ${CUDA_VISIBLE_DEVICES}"
-echo "[SLURM] Config        : condor_nq"
+echo "[SLURM] Config        : condor_nq  (+smoke overrides)"
 echo "[SLURM] Start time    : $(date)"
+echo "[SLURM] ============================================================"
 
-# ── Add timestamp suffix to experiment name to avoid W&B collisions ───────────
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-EXPERIMENT_NAME="condor_qwen2.5_7b_nq_${SLURM_JOB_ID}_${TIMESTAMP}"
+EXPERIMENT_NAME="condor_qwen2.5_7b_nq_smoke_${SLURM_JOB_ID}_${TIMESTAMP}"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 cd ${PROJECT_ROOT}
 
+# Smoke-test overrides (all passed as Hydra CLI args on top of condor_nq.yaml):
+#   batch_size=16 so GRPO normalisation still has > 1 sample per group
+#   total_training_steps=3 — run exactly 3 gradient steps and exit
+#   val_before_train=false — skip the 50-min pre-train validation pass
+#   test_freq=3 / save_freq=9999 — validate once at the end, no checkpoint saves
 python -m verl.trainer.main_ppo_condor \
     --config-path "${PROJECT_ROOT}/configs" \
     --config-name  condor_nq \
-    "wandb.project=verl_condor_nq" \
+    "wandb.project=verl_condor_nq_smoke" \
     "wandb.experiment=${EXPERIMENT_NAME}" \
     "paths.sft_checkpoint=${LOCAL_7B}" \
+    "data.train_batch_size=16" \
+    "data.val_batch_size=16" \
+    "actor_rollout_ref.actor.ppo_mini_batch_size=16" \
+    "actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1" \
+    "actor_rollout_ref.ref.ppo_mini_batch_size=16" \
+    "actor_rollout_ref.ref.ppo_micro_batch_size_per_gpu=2" \
+    "critic.ppo_mini_batch_size=16" \
+    "critic.ppo_micro_batch_size_per_gpu=2" \
+    "critic.forward_micro_batch_size_per_gpu=2" \
+    "trainer.total_training_steps=3" \
+    "trainer.val_before_train=false" \
+    "trainer.test_freq=3" \
+    "trainer.save_freq=9999" \
     "actor_rollout_ref.rollout.gpu_memory_utilization=${GMU}" \
     "$@"
 
 EXIT_CODE=$?
 echo "[SLURM] End time: $(date)  Exit code: ${EXIT_CODE}"
 
+# On failure, dump the last 150 lines of each Ray worker log so OOM/error details
+# (including vLLM "Sleep mode freed X GiB" messages) appear in the SLURM output.
 if [ ${EXIT_CODE} -ne 0 ]; then
     echo "[SLURM] === Ray worker logs (last 150 lines each) ==="
     find ${RAY_TMPDIR} -name "worker-*.log" -newer /proc/1/cmdline 2>/dev/null \

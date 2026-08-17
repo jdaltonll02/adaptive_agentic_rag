@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=0:30:00
-#SBATCH --output=/data/user_data/jgibson2/condor/logs/slurm/%j_generate_plots.out
-#SBATCH --error=/data/user_data/jgibson2/condor/logs/slurm/%j_generate_plots.err
+#SBATCH --output=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_generate_plots.out
+#SBATCH --error=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_generate_plots.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=dalton.edu02@gmail.com
 
@@ -22,7 +22,7 @@
 #   --smooth      20        training curve smoothing window (default 20)
 
 source ~/.bashrc
-conda activate condor
+source .venv/bin/activate
 
 PROJECT_ROOT=/home/jgibson2/projects/adaptive_rag
 BASELINE_ROOT=${PROJECT_ROOT}/baseline

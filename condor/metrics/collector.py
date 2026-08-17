@@ -63,7 +63,7 @@ class MetricsCollector:
         Unique run identifier; becomes the filename prefix.
     """
 
-    def __init__(self, metrics_dir: str, experiment_name: str):
+    def __init__(self, metrics_dir: str = "outputs/metrics", experiment_name: str = "condor"):
         self.metrics_dir = metrics_dir
         self.experiment_name = experiment_name
         os.makedirs(metrics_dir, exist_ok=True)

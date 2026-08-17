@@ -207,3 +207,13 @@ class Agentic_RAG_Manager:
                 return False
 
         return True
+
+
+# Re-export baseline QA_Manager so ray_trainer_agentic_rag_2 imports resolve.
+import os as _os, sys as _sys
+_baseline_qa = _os.path.normpath(
+    _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'baseline', 'qa_manager')
+)
+_sys.path.insert(0, _baseline_qa)
+from qa import QA_Manager  # noqa: F401  (baseline class, imported but unused by CONDOR trainer)
+_sys.path.remove(_baseline_qa)

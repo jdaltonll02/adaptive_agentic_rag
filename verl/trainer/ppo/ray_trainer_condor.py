@@ -66,8 +66,8 @@ from verl.utils.tracking import Tracking  # noqa: E402
 try:
     from verl.trainer.ppo.core_algos import compute_advantage, apply_kl_penalty, agg_loss  # noqa: E402
     from verl.utils.seqlen_balancing import get_seqlen_balancing_stats  # noqa: E402
-except ImportError:
-    pass
+except ImportError as e:
+    raise ImportError(f"Required baseline verl utilities not found: {e}") from e
 
 # ---------------------------------------------------------------------------
 # CONDOR imports (from project root)
@@ -236,12 +236,16 @@ class CONDORRayPPOTrainer(RayPPOTrainer):
             lr=_get('router_lr', 1e-3),
             use_condor=True,
         )
-        self.dual_alpha_manager = DualAlphaManager(
-            lambda_hi_init=_get('lambda_hi_init', 0.1),
-            lambda_lo_init=_get('lambda_lo_init', 0.0),
-            budget_hi=_get('budget_hi', 0.5),
-            budget_lo=_get('budget_lo', 0.3),
-            lr=_get('dual_alpha_lr', 1e-3),
+        # Two separate instances — one per level (spec Part A)
+        self.dual_hi = DualAlphaManager(
+            budget=_get('budget_hi', 0.0005),
+            lr=_get('dual_lr_hi', 5e-4),
+            lam_init=_get('lambda_hi_init', 0.10),
+        )
+        self.dual_lo = DualAlphaManager(
+            budget=_get('budget_lo', 0.0004),
+            lr=_get('dual_lr_lo', 1e-3),
+            lam_init=_get('lambda_lo_init', 0.08),
         )
         self.phi_scorer = PhiScorer(
             t_warmup=int(_get('phi_t_warmup', 500)),
@@ -268,6 +272,50 @@ class CONDORRayPPOTrainer(RayPPOTrainer):
         self._reinforce_gamma: float = _get('reinforce_gamma', 0.99)
         self._l0_threshold: float = _get('l0_reward_threshold', 0.4)
         self._cluster_freq: int = int(_get('cluster_report_freq', 50))
+
+    # ------------------------------------------------------------------
+    # Checkpoint: persist CONDOR L0 state alongside baseline L1 state
+    # ------------------------------------------------------------------
+
+    def _save_checkpoint(self):
+        super()._save_checkpoint()
+        if not self.use_condor:
+            return
+        import torch as _torch
+        condor_path = os.path.join(
+            self.config.trainer.default_local_dir,
+            f"global_step_{self.global_steps}",
+            "condor_state.pt",
+        )
+        os.makedirs(os.path.dirname(condor_path), exist_ok=True)
+        _torch.save({
+            'router': self.mechanism_router.state_dict_router(),
+            'dual_hi': self.dual_hi.state_dict(),
+            'dual_lo': self.dual_lo.state_dict(),
+            'phi': self.phi_scorer.state_dict_phi(),
+            'global_steps': self.global_steps,
+        }, condor_path)
+        print(f"[CONDOR] Saved CONDOR state to {condor_path}")
+
+    def _load_checkpoint(self):
+        super()._load_checkpoint()
+        if not self.use_condor:
+            return
+        import torch as _torch
+        condor_path = os.path.join(
+            self.config.trainer.default_local_dir,
+            f"global_step_{self.global_steps}",
+            "condor_state.pt",
+        )
+        if not os.path.exists(condor_path):
+            return
+        state = _torch.load(condor_path, map_location='cpu')
+        self.mechanism_router.load_state_dict_router(state['router'])
+        if 'dual_hi' in state:
+            self.dual_hi.load_state_dict(state['dual_hi'])
+            self.dual_lo.load_state_dict(state['dual_lo'])
+        self.phi_scorer.load_state_dict_phi(state['phi'])
+        print(f"[CONDOR] Loaded CONDOR state from {condor_path}")
 
     # ------------------------------------------------------------------
     # Helpers
@@ -390,21 +438,34 @@ class CONDORRayPPOTrainer(RayPPOTrainer):
     ):
         """One full CONDOR update cycle after a training batch."""
 
-        lambda_hi = self.dual_alpha_manager.lambda_hi
-        lambda_lo = self.dual_alpha_manager.lambda_lo
+        lambda_hi = self.dual_hi.value
+        lambda_lo = self.dual_lo.value
 
-        # ---- L0 rewards ----
-        baseline_f1 = 0.0  # no baseline for first step; later use phi_scorer
+        # Phi–Critic blend weight (Eq. 8). We have no separate V_hi critic, so
+        # critic_val=0.0 throughout, meaning alpha_t has no effect until V_hi is wired.
+        alpha_t = self.phi_scorer.get_blend_alpha()
+
+        # ---- L0 rewards (Eq. 9) ----
+        # Â_hi = R_f1 - 1/(|M|-1) * Σ_{m≠m*} Q̂(S,m,t) - λ_hi * C_hi
+        # Q̂(S,m,t) = (1-α_t)*Φ(q,m) + α_t*V_hi(S,m)  [V_hi=0 until critic wired]
         l0_rewards = []
         for qi in range(len(questions)):
             f1 = f1_list[qi]
-            phi_val = self.phi_scorer.score(features_list[qi], m_star_list[qi], qtype_list[qi])
-            blended_baseline = self.phi_scorer.blended_baseline(phi_val, 0.0)
+            m_star = m_star_list[qi]
+            # Average counterfactual Q̂ over the 4 mechanisms NOT selected (Eq. 9)
+            cf_vals = []
+            for m_other in range(5):
+                if m_other == m_star:
+                    continue
+                phi_m = self.phi_scorer.score(features_list[qi], m_other, qtype_list[qi])
+                q_m = (1.0 - alpha_t) * phi_m  # V_hi=0.0 until critic is wired in
+                cf_vals.append(q_m)
+            cf_baseline = float(np.mean(cf_vals)) if cf_vals else 0.0
             r_hi = self.process_reward_model.compute_l0_reward(
                 f1=f1,
-                m_star=m_star_list[qi],
+                m_star=m_star,
                 lambda_hi=lambda_hi,
-                baseline_f1=blended_baseline,
+                baseline_f1=cf_baseline,
             )
             l0_rewards.append(r_hi)
             self.mechanism_router.store_reward(r_hi)
@@ -420,10 +481,8 @@ class CONDORRayPPOTrainer(RayPPOTrainer):
         avg_token_cost_norm = float(
             np.mean([min(tc / 0.01, 1.0) for tc in total_token_cost])
         )  # 0.01 USD ≈ budget unit
-        new_lambda_hi, new_lambda_lo = self.dual_alpha_manager.update(
-            avg_cost_hi=avg_mech_cost_hi,
-            avg_cost_lo=avg_token_cost_norm,
-        )
+        new_lambda_hi = self.dual_hi.update(avg_mech_cost_hi)
+        new_lambda_lo = self.dual_lo.update(avg_token_cost_norm)
         # Push new lambda_lo into reward manager for next batch
         self.reward_manager.lambda_lo = new_lambda_lo
 
@@ -486,6 +545,172 @@ class CONDORRayPPOTrainer(RayPPOTrainer):
         )
 
     # ------------------------------------------------------------------
+    # Validation with per-process timeout (fixes hang in job 9277115)
+    # ------------------------------------------------------------------
+
+    def _validate_agentic(self):
+        """Override baseline _validate_agentic to add per-process timeout on
+        run_workflow subprocesses.  A hung process (e.g. stalled vLLM call)
+        is killed after workflow_timeout seconds and the question is skipped
+        with an empty answer, so the batch completes rather than hanging.
+        """
+        condor_cfg = getattr(self.config, 'condor', None)
+        timeout = int(getattr(condor_cfg, 'workflow_timeout', 120))
+
+        qa_manager = Agentic_RAG_Manager(self.tokenizer, self.config)
+        agent_pool = AgentPool()
+
+        test_metrics_dict = {"acc": [], "em": [], "f1": [], "precision": [], "recall": []}
+        test_cost_dict = {"token_cost": [], "api_times": [], "avr_api_per_turn": [], "turn_num": []}
+
+        batch_id = -1
+        for batch_dict in tqdm(self.val_dataloader, desc="Validation Progress"):
+            batch_id += 1
+
+            print('************************* testing: rollout *************************')
+            extra_info = batch_dict['extra_info']
+            questions = [item['question'] for item in extra_info]
+            golden_answers = [item['answer'] for item in extra_info]
+
+            batch_list, metrics_list = [], []
+            predicted_answers_list = [""] * len(questions)
+            MAX_TURN = 5
+            context_list = init_context_1turn_list(batch_dict, MAX_TURN)
+            token_cost_list = []
+
+            for turn_id in range(MAX_TURN):
+                print(f'*********************************** testing: new turn {turn_id} ***********************************')
+                metrics = {}
+                batch, metrics, _ = self.rollout(batch_dict, metrics, context_list, qa_manager, MAX_TURN)
+                workflows_1turn, initial_workflows_context = self.get_answers_subs_list(batch)
+                is_legal_list = self.is_legal_workflows(workflows_1turn, context_list, qa_manager)
+
+                with Manager() as manager:
+                    turn_context_list = []
+                    for temp_i, context in enumerate(context_list):
+                        if is_legal_list[temp_i]:
+                            turn_context_list.append(convert_to_shared_structure(context, manager))
+                        else:
+                            turn_context_list.append(context)
+                    turn_context_list = manager.list(turn_context_list)
+                    turn_predicted_answers_list = manager.list([""] * len(questions))
+
+                    processes = []
+                    for temp_i in range(len(questions)):
+                        p = Process(
+                            target=run_workflow,
+                            args=(temp_i, turn_id, turn_context_list, is_legal_list,
+                                  workflows_1turn, turn_predicted_answers_list,
+                                  agent_pool, qa_manager, MAX_TURN),
+                        )
+                        processes.append(p)
+                        p.start()
+
+                    for p in processes:
+                        p.join(timeout=timeout)
+                        if p.is_alive():
+                            print(f'[CONDOR] WARNING: workflow process timed out after {timeout}s, killing.')
+                            p.kill()
+                            p.join()
+
+                    local_context_list = convert_to_local_structure(turn_context_list)
+                    local_predicted = convert_to_local_structure(turn_predicted_answers_list)
+
+                context_list = local_context_list
+                for a_i, ans in enumerate(local_predicted):
+                    if ans != "":
+                        predicted_answers_list[a_i] = ans
+
+                batch, metrics = self.compute_logprobs_values_format_penalty(batch, metrics, is_legal_list)
+                batch_list.append(batch)
+                metrics_list.append(metrics)
+
+                token_cost_turn = []
+                for context in context_list:
+                    token_cost_turn.append(deepcopy(context['token_cost']))
+                    for key in context['token_cost']:
+                        context['token_cost'][key] = 0.0
+                token_cost_list.append(token_cost_turn)
+
+                _log_dir = getattr(self.config.trainer, 'log_dir', '/tmp')
+                os.makedirs(_log_dir, exist_ok=True)
+                _log_path = os.path.join(
+                    _log_dir,
+                    f'testing_log_{self.config.trainer.experiment_name}.txt',
+                )
+                with open(_log_path, 'a', encoding='utf-8') as f:
+                    f.write(f'>>>>>>>>>>>>>> batch id: {batch_id} <<<<<<<<<<<<<<<<\n')
+                    f.write(f'>>>>>>>>>>>>>> turn id: {turn_id} <<<<<<<<<<<<<<<<\n')
+                    for qi in range(len(questions)):
+                        q_id = batch_id * self.config.data.train_batch_size + qi
+                        f.write(
+                            f'question id: {q_id}, is_legal: {is_legal_list[qi]}, '
+                            f'workflow: {workflows_1turn[qi]}, '
+                            f'initial workflow: {initial_workflows_context[qi]}\n'
+                        )
+                    f.write('\n')
+
+                if "" not in predicted_answers_list:
+                    break
+
+            for temp_i in range(len(questions)):
+                if predicted_answers_list[temp_i] == "":
+                    agent = agent_pool.get("AnswerSummarizationAgent")
+                    agent.run(context_list[temp_i])
+                    predicted_answers_list[temp_i] = context_list[temp_i]['answer']
+
+            _log_path = os.path.join(
+                getattr(self.config.trainer, 'log_dir', '/tmp'),
+                f'testing_log_{self.config.trainer.experiment_name}.txt',
+            )
+            with open(_log_path, 'a', encoding='utf-8') as f:
+                f.write(f'>>>>>>>>>>>>>> batch id: {batch_id} <<<<<<<<<<<<<<<<\n')
+                for a_id in range(len(predicted_answers_list)):
+                    f.write(
+                        f'question id: {a_id}, golden answer: {golden_answers[a_id]}, '
+                        f'predict answer: {predicted_answers_list[a_id]}\n'
+                    )
+                f.write('\n\n\n\n')
+
+            print('************************* compute testing metrics *************************')
+            for temp_i in range(len(questions)):
+                temp_metrics = self.reward_manager.compute_scores(
+                    [predicted_answers_list[temp_i]], [golden_answers[temp_i]]
+                )
+                for key in test_metrics_dict:
+                    test_metrics_dict[key].append(temp_metrics.get(key, 0.0))
+
+            # Cost aggregation
+            n_turns_actual = len(token_cost_list)
+            n_q = len(questions)
+            total_token_cost = [
+                sum(token_cost_list[tid][qi].get(k, 0.0)
+                    for tid in range(n_turns_actual)
+                    for k in token_cost_list[tid][qi]
+                    if k != 'RetrievalAgent')
+                for qi in range(n_q)
+            ]
+            total_api_cost = [
+                sum(1 for tid in range(n_turns_actual)
+                    if token_cost_list[tid][qi].get('RetrievalAgent', 0) == 1)
+                for qi in range(n_q)
+            ]
+            test_cost_dict['token_cost'].extend(total_token_cost)
+            test_cost_dict['api_times'].extend(total_api_cost)
+            test_cost_dict['turn_num'].extend([
+                max(ctx.get('end_step', 0) - ctx.get('begin_step', 0) + 1, 1)
+                for ctx in context_list
+            ])
+
+        val_metrics = {}
+        for key, vals in test_metrics_dict.items():
+            val_metrics[f'val/{key}'] = float(np.mean(vals)) if vals else 0.0
+        for key, vals in test_cost_dict.items():
+            if vals:
+                val_metrics[f'val/cost/{key}'] = float(np.mean(vals))
+        return val_metrics
+
+    # ------------------------------------------------------------------
     # Main training loop
     # ------------------------------------------------------------------
 
@@ -532,13 +757,10 @@ class CONDORRayPPOTrainer(RayPPOTrainer):
         agent_pool = AgentPool()
 
         # Initialise lambda_lo in reward manager
-        self.reward_manager.lambda_lo = self.dual_alpha_manager.lambda_lo
+        self.reward_manager.lambda_lo = self.dual_lo.value
 
         for epoch in range(self.config.trainer.total_epochs):
             for batch_id, batch_dict in enumerate(self.train_dataloader):
-
-                if batch_id >= 0:
-                    break
 
                 print('*** [CONDOR] rollout ***')
                 extra_info = batch_dict['extra_info']
@@ -587,6 +809,8 @@ class CONDORRayPPOTrainer(RayPPOTrainer):
 
                         turn_predicted_answers_list = manager.list([""] * len(questions))
 
+                        condor_cfg = getattr(self.config, 'condor', None)
+                        _timeout = int(getattr(condor_cfg, 'workflow_timeout', 120))
                         processes = []
                         for temp_i in range(len(questions)):
                             p = Process(
@@ -598,7 +822,11 @@ class CONDORRayPPOTrainer(RayPPOTrainer):
                             processes.append(p)
                             p.start()
                         for p in processes:
-                            p.join()
+                            p.join(timeout=_timeout)
+                            if p.is_alive():
+                                print(f'[CONDOR] WARNING: workflow process timed out after {_timeout}s, killing.')
+                                p.kill()
+                                p.join()
 
                         local_context_list = convert_to_local_structure(turn_context_list)
                         local_predicted = convert_to_local_structure(turn_predicted_answers_list)

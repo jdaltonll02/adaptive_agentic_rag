@@ -3,21 +3,20 @@
 #
 # Convention
 # ----------
-# aqawflow_data : existing downloaded data from the baseline project
-# heavy_root    : /data/user_data/jgibson2/condor  (CONDOR-generated outputs: checkpoints, etc.)
+# aqawflow_data : all data now lives under condor/data/ (aqawflow/ was deleted)
+# heavy_root    : /data/user_data/jgibson2/condor  (CONDOR checkpoints, generated data)
 # light_root    : repo-local directory for metrics, plots, logs (small files, in repo)
 #
-# All dataset parquets point to aqawflow/data/ where they exist.
-# The only exception is nq/train, which must be generated once from the NQ JSON source
-# (run: bash scripts/prep_nq_train.sh).
+# All dataset parquets live under condor/data/.
+# Run slurm/setup_condor_data.slurm once to populate models, retriever, and test splits.
 
 paths:
   # ── Repo roots ──────────────────────────────────────────────────────────────
   project_root:   /home/jgibson2/projects/adaptive_rag
   baseline_root:  /home/jgibson2/projects/adaptive_rag/baseline
 
-  # ── Existing downloaded data (read-only; do not delete) ─────────────────────
-  aqawflow_data:  /data/user_data/jgibson2/aqawflow/data
+  # ── Data root (all data now lives under condor/) ────────────────────────────
+  aqawflow_data:  /data/user_data/jgibson2/condor/data
 
   # ── Heavy-output root (CONDOR checkpoints, generated data) ──────────────────
   heavy_root:     /data/user_data/jgibson2/condor
@@ -26,37 +25,39 @@ paths:
   light_root:     /home/jgibson2/projects/adaptive_rag/outputs
 
   # ── Training & evaluation data parquets ─────────────────────────────────────
-  # NQ train must be generated once (see scripts/prep_nq_train.sh)
-  # All test splits and non-NQ train splits already exist in aqawflow/data.
   nq:
-    train:  /data/user_data/jgibson2/condor/data/nq/train.parquet
-    test:   /data/user_data/jgibson2/aqawflow/data/nq/test_996.parquet
+    train:     /data/user_data/jgibson2/condor/data/nq/train.parquet
+    train_10k: /data/user_data/jgibson2/condor/data/nq/train_10k.parquet
+    test:      /data/user_data/jgibson2/condor/data/nq/test_996.parquet
 
   hotpot_qa:
-    train:  /data/user_data/jgibson2/aqawflow/data/hotpot_qa/train.parquet
-    test:   /data/user_data/jgibson2/aqawflow/data/hotpot_qa/test_996.parquet
+    train:  /data/user_data/jgibson2/condor/data/hotpot_qa/train.parquet
+    test:   /data/user_data/jgibson2/condor/data/hotpot_qa/test_996.parquet
 
   ambig_qa:
-    train:  /data/user_data/jgibson2/aqawflow/data/ambig_qa/train.parquet
-    test:   /data/user_data/jgibson2/aqawflow/data/ambig_qa/test_996.parquet
+    train:  /data/user_data/jgibson2/condor/data/ambig_qa/train.parquet
+    test:   /data/user_data/jgibson2/condor/data/ambig_qa/test_996.parquet
 
   musique:
-    train:  /data/user_data/jgibson2/aqawflow/data/musique/train.parquet
-    test:   /data/user_data/jgibson2/aqawflow/data/musique/test_996.parquet
+    train:  /data/user_data/jgibson2/condor/data/musique/train.parquet
+    test:   /data/user_data/jgibson2/condor/data/musique/test_996.parquet
 
   two_wiki:
-    train:  /data/user_data/jgibson2/aqawflow/data/2wikimultihop_qa/train.parquet
-    test:   /data/user_data/jgibson2/aqawflow/data/2wikimultihop_qa/test_996.parquet
+    train:  /data/user_data/jgibson2/condor/data/2wikimultihop_qa/train.parquet
+    test:   /data/user_data/jgibson2/condor/data/2wikimultihop_qa/test_996.parquet
 
   bamboogle:
-    test:   /data/user_data/jgibson2/aqawflow/data/bamboogle/test.parquet
+    test:   /data/user_data/jgibson2/condor/data/bamboogle/test.parquet
 
   pop_qa:
-    test:   /data/user_data/jgibson2/aqawflow/data/pop_qa/test_996.parquet
+    test:   /data/user_data/jgibson2/condor/data/pop_qa/test_996.parquet
 
   # ── Model checkpoints ───────────────────────────────────────────────────────
-  sft_checkpoint:    /data/user_data/jgibson2/aqawflow/checkpoints/sft/qwen2.5_1.5b/global_step_11
-  rl_checkpoint_dir: /data/user_data/jgibson2/condor/checkpoints/rl
+  # L1 PlanningAgent (actor trained via PPO) — Qwen2.5-7B-Instruct
+  sft_checkpoint:         /data/user_data/jgibson2/condor/checkpoints/sft/qwen2.5_7b_instruct
+  # Executor agent (frozen, served via vLLM) — Qwen2.5-14B-Instruct
+  executor_checkpoint:    /data/user_data/jgibson2/condor/checkpoints/sft/qwen2.5_14b_instruct
+  rl_checkpoint_dir:      /data/user_data/jgibson2/condor/checkpoints/rl
 
   # ── Light outputs (metrics / plots — committed to repo) ──────────────────────
   metrics_dir:  /home/jgibson2/projects/adaptive_rag/outputs/metrics

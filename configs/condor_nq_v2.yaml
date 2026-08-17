@@ -15,12 +15,12 @@ defaults:
 
 # ── W&B / tracking ────────────────────────────────────────────────────────────
 wandb:
-  project: verl_condor_nq
-  experiment: condor_qwen2.5_1.5b_nq   # overridden at runtime with timestamp suffix
+  project: verl_condor_nq_v2
+  experiment: condor_qwen2.5_7b_nq_v2   # overridden at runtime with timestamp suffix
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 data:
-  train_files:            ["${paths.nq.train}"]
+  train_files:            ["${paths.nq.train_10k}"]
   val_files:              ["${paths.nq.test}"]
   train_batch_size:       96
   val_batch_size:         96
@@ -84,7 +84,7 @@ actor_rollout_ref:
     checkpoint:
       contents: [model, optimizer, extra]
     optim:
-      lr:                       3.0e-7
+      lr:                       1.0e-6
       lr_warmup_steps:          -1
       lr_warmup_steps_ratio:    0.0
       min_lr_ratio:             0.0
@@ -100,6 +100,15 @@ actor_rollout_ref:
       offload_policy:      false
       reshard_after_forward: true
       fsdp_size:           -1
+      # fsdp_workers.py line 206: actor defaults to torch.float32 ("optimizer must be fp32").
+      # That gives 14 GB fp32 master weights + 14 GB fp32 grads + 14 GB exp_avg + 14 GB
+      # exp_avg_sq = 56 GB, which OOMs on L40S 44 GB.  Override to bf16: FlatParams stay
+      # bf16, optimizer states are bf16 (7+7=14 GB total), peak ~30 GB — fits.
+      model_dtype: bfloat16
+      mixed_precision:
+        param_dtype: bf16
+        reduce_dtype: bf16
+        buffer_dtype: fp32
   rollout:
     mode:                               sync
     name:                               vllm
@@ -250,8 +259,9 @@ trainer:
   total_epochs:     1
   n_gpus_per_node:  2
   nnodes:           1
-  save_freq:        25
-  test_freq:        25
+  save_freq:        10
+  test_freq:        10
+  max_actor_ckpt_to_keep: 2
   critic_warmup:    0
   val_before_train: true
   val_only:         false
@@ -262,7 +272,7 @@ trainer:
 
   # Output directories (light = repo/outputs; heavy = /data/user_data/jgibson2/condor)
   device:            cuda
-  total_training_steps: null
+  total_training_steps: 100
   log_val_generations: 0
   resume_mode:       disable
   resume_from_path:  null
@@ -300,7 +310,7 @@ condor:
   phi_lr:           1.0e-3  # MLP learning rate
 
   # Reward shaping
-  l0_reward_threshold: 0.4  # F1 threshold for l0_correct binary signal
+  l0_reward_threshold: 0.2  # F1 threshold for l0_correct binary signal
 
   # Trajectory clustering (failure taxonomy)
   cluster_report_freq: 50   # run K-Means report every N global steps

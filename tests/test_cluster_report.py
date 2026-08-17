@@ -33,8 +33,8 @@ def test_analyze_has_cluster_keys(report):
 
 def test_analyze_each_cluster_has_taxonomy(report):
     result = report.analyze(_make_feature_matrix())
-    valid_taxonomies = {'efficient_correct', 'efficient_incorrect',
-                        'expensive_correct', 'expensive_incorrect', 'empty'}
+    valid_taxonomies = {'success_l0_l1_correct', 'l1_workflow_failure',
+                        'l0_wrong_l1_recovered', 'systemic_failure', 'empty'}
     for k in range(4):
         assert result[f'cluster_{k}']['taxonomy'] in valid_taxonomies
 

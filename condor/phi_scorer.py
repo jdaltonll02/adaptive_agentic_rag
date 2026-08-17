@@ -41,6 +41,7 @@ class PhiScorer(nn.Module):
             nn.Linear(hidden_dim, 32),
             nn.ReLU(),
             nn.Linear(32, 1),
+            nn.Sigmoid(),  # F1 ∈ [0,1]; spec Eq. 17 uses Sigmoid output
         )
         self._optimizer = optim.Adam(self.parameters(), lr=lr)
 

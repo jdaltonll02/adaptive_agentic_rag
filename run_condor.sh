@@ -21,6 +21,10 @@ BASELINE_ROOT="${PROJECT_ROOT}/baseline"
 export PYTHONPATH="${PROJECT_ROOT}:${BASELINE_ROOT}:${PYTHONPATH:-}"
 export TOKENIZERS_PARALLELISM=true
 
+# LLM API credentials (CMU gateway)
+export OPENAI_API_BASE="${OPENAI_BASE_URL:-https://ai-gateway.andrew.cmu.edu}"
+export OPENAI_API_KEY="${OPENAI_API_KEY}"
+
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 python -m verl.trainer.main_ppo_condor \

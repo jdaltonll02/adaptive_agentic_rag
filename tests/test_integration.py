@@ -95,15 +95,16 @@ def test_e2e_dual_alpha_converges():
     """DualAlphaManager should converge lambdas in response to cost signals."""
     from condor.dual_alpha_manager import DualAlphaManager
 
-    dam = DualAlphaManager(lambda_hi_init=0.1, lambda_lo_init=0.0,
-                            budget_hi=0.5, budget_lo=0.3, lr=5e-3)
+    hi = DualAlphaManager(budget=0.0005, lr=5e-3, lam_init=0.10)
+    lo = DualAlphaManager(budget=0.0004, lr=5e-3, lam_init=0.08)
 
     # Simulate over-budget scenario
     for _ in range(200):
-        dam.update(avg_cost_hi=0.8, avg_cost_lo=0.7)
+        hi.update(mean_cost=0.01)
+        lo.update(mean_cost=0.01)
 
-    assert dam.lambda_hi > 0.1, "lambda_hi should increase when cost > budget"
-    assert dam.lambda_lo > 0.0, "lambda_lo should increase when cost > budget"
+    assert hi.value > 0.10, "lambda_hi should increase when cost > budget"
+    assert lo.value > 0.08, "lambda_lo should increase when cost > budget"
 
 
 def test_e2e_phi_update_and_blend():
