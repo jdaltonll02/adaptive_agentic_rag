@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=dl_qwen32b
-#SBATCH --partition=general
+#SBATCH --partition=preempt
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8

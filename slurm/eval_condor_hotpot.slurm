@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=condor_eval_hotpot
-#SBATCH --partition=general
+#SBATCH --partition=preempt
+#SBATCH --requeue
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16

@@ -23,8 +23,8 @@ wandb:
 data:
   train_files:            ["${paths.hotpot_qa.train}"]
   val_files:              ["${paths.hotpot_qa.test}"]
-  train_batch_size:       96
-  val_batch_size:         96
+  train_batch_size:       128
+  val_batch_size:         128
   max_prompt_length:      1024
   max_response_length:    1024
   filter_overlong_prompts: false
@@ -63,7 +63,7 @@ actor_rollout_ref:
     dtype:                        bfloat16
   actor:
     strategy:                     fsdp
-    ppo_mini_batch_size:          96
+    ppo_mini_batch_size:          128
     ppo_micro_batch_size:         null
     ppo_micro_batch_size_per_gpu: 4
     use_dynamic_bsz:              false
@@ -151,7 +151,7 @@ actor_rollout_ref:
     use_remove_padding:                 false
     use_fused_kernels:                  false
     ulysses_sequence_parallel_size:     1
-    ppo_mini_batch_size:                96
+    ppo_mini_batch_size:                128
     ppo_micro_batch_size:               null
     ppo_micro_batch_size_per_gpu:       4
     ppo_max_token_len_per_gpu:          16384
@@ -208,7 +208,7 @@ critic:
       reshard_after_forward: true
       fsdp_size:             -1
   rollout_n:                    1
-  ppo_mini_batch_size:          96
+  ppo_mini_batch_size:          128
   ppo_micro_batch_size:         null
   ppo_micro_batch_size_per_gpu: 4
   ppo_max_token_len_per_gpu:    32768
@@ -254,7 +254,7 @@ algorithm:
 # ── Trainer ───────────────────────────────────────────────────────────────────
 trainer:
   total_epochs:     1
-  n_gpus_per_node:  2
+  n_gpus_per_node:  4
   nnodes:           1
   save_freq:        10
   test_freq:        10
@@ -267,7 +267,7 @@ trainer:
   project_name:     "${wandb.project}"
   experiment_name:  "${wandb.experiment}"
   device:            cuda
-  total_training_steps: 130
+  total_training_steps: 200
   log_val_generations: 0
   resume_mode:       disable
   resume_from_path:  null
@@ -285,9 +285,10 @@ condor:
   use_condor: true
 
   # L0 mechanism router
-  epsilon_start:    0.9
-  epsilon_end:      0.1
-  epsilon_decay:    50
+  # epsilon_decay is the multiplicative factor per step (spec: εt = ε0 · decay^t)
+  epsilon_start:    0.8
+  epsilon_end:      0.05
+  epsilon_decay:    0.992
   router_lr:        1.0e-3
   reinforce_gamma:  0.99
 

@@ -2,7 +2,7 @@
 
 from condor.mechanism_router import MECHANISM_SELECTION_COST
 
-# Mechanism-specific reward weight vectors (spec Section 3.3 table)
+# Mechanism-specific reward weight vectors (spec Section 3.3 table).
 MECHANISM_WEIGHTS = {
     0: dict(w_doc=0.0, w_ans=0.6, w_reas=0.3, w_ver=0.1),  # Pure LLM
     1: dict(w_doc=0.4, w_ans=0.5, w_reas=0.0, w_ver=0.1),  # Std RAG
@@ -10,6 +10,26 @@ MECHANISM_WEIGHTS = {
     3: dict(w_doc=0.3, w_ans=0.4, w_reas=0.1, w_ver=0.2),  # Graph RAG
     4: dict(w_doc=0.2, w_ans=0.5, w_reas=0.0, w_ver=0.3),  # Web RAG
 }
+
+# Per-qtype delta applied on top of the base mechanism weights.
+# qtype: 0=factoid, 1=multi-hop, 2=comparison, 3=complex
+# Values shift (m*, qtype)-specific components; unnormalized — they sum to 0.
+_QTYPE_DELTAS = {
+    0: dict(w_doc=+0.05, w_ans=0.00, w_reas=-0.05, w_ver=0.00),  # factoid: more doc
+    1: dict(w_doc=-0.05, w_ans=-0.05, w_reas=+0.08, w_ver=+0.02),  # multi-hop: more reasoning
+    2: dict(w_doc=0.00, w_ans=-0.05, w_reas=+0.02, w_ver=+0.03),   # comparison: more verify
+    3: dict(w_doc=0.00, w_ans=-0.05, w_reas=+0.03, w_ver=+0.02),   # complex: balanced shift
+}
+
+
+def get_goal_conditioned_weights(m_star: int, qtype_id: int) -> dict:
+    """Return (m*, qtype)-conditioned weight dict, clamped to [0, 1]."""
+    base = MECHANISM_WEIGHTS[m_star]
+    delta = _QTYPE_DELTAS.get(qtype_id, _QTYPE_DELTAS[0])
+    return {
+        k: max(0.0, min(1.0, base[k] + delta[k]))
+        for k in ('w_doc', 'w_ans', 'w_reas', 'w_ver')
+    }
 
 
 class ProcessRewardModel:
@@ -47,6 +67,7 @@ class ProcessRewardModel:
         cot_active: bool = False,
         ver_active: bool = False,
         format_penalty: float = 0.0,
+        qtype_id: int = 0,
     ) -> float:
         """Goal-conditioned process reward (spec Eq. 3.3).
 
@@ -59,8 +80,9 @@ class ProcessRewardModel:
             cot_active: True when CoT or NRA executor is active
             ver_active: True when AV or CC executor is active
             format_penalty: R_FP(t) format penalty signal
+            qtype_id: query-type label ∈ {0,1,2,3} for goal-conditioning
         """
-        w = MECHANISM_WEIGHTS[m_star]
+        w = get_goal_conditioned_weights(m_star, qtype_id)
         r = w['w_doc'] * doc_relevance
         r += w['w_ans'] * partial_f1
         r += w['w_reas'] * (reasoning_coherence if cot_active else 0.0)

@@ -252,6 +252,11 @@ class CONDORRayPPOTrainer(RayPPOTrainer):
             tau_trans=float(_get('phi_tau_trans', 100.0)),
             lr=_get('phi_lr', 1e-3),
         )
+        # Ring buffer: (features[32], m_id, qtype_id, f1) — keeps 5000 most recent episodes.
+        # PhiScorer trains on this buffer instead of only the current batch, giving
+        # more stable value estimates from diverse past experience (spec Appendix B).
+        import collections as _collections
+        self._phi_ring: _collections.deque = _collections.deque(maxlen=5000)
         self.trajectory_logger = TrajectoryLogger()
         self.process_reward_model = ProcessRewardModel()
         self.cluster_report = ClusterReport(n_clusters=4)
@@ -486,8 +491,20 @@ class CONDORRayPPOTrainer(RayPPOTrainer):
         # Push new lambda_lo into reward manager for next batch
         self.reward_manager.lambda_lo = new_lambda_lo
 
-        # ---- PhiScorer update ----
-        phi_loss = self.phi_scorer.update(features_list, m_star_list, qtype_list, f1_list)
+        # ---- PhiScorer update (ring buffer for stable training) ----
+        # Push current batch into the ring buffer.
+        for feat, m, qt, f1 in zip(features_list, m_star_list, qtype_list, f1_list):
+            self._phi_ring.append((feat.copy() if hasattr(feat, 'copy') else feat, m, qt, f1))
+        # Sample up to 256 entries from the ring buffer for a more stable update.
+        _buf = list(self._phi_ring)
+        if len(_buf) > 256:
+            import random as _random
+            _buf = _random.sample(_buf, 256)
+        _ring_feats = [e[0] for e in _buf]
+        _ring_mids  = [e[1] for e in _buf]
+        _ring_qtids = [e[2] for e in _buf]
+        _ring_f1s   = [e[3] for e in _buf]
+        phi_loss = self.phi_scorer.update(_ring_feats, _ring_mids, _ring_qtids, _ring_f1s)
 
         # ---- Trajectory logging ----
         for qi in range(len(questions)):

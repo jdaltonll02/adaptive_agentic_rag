@@ -184,6 +184,11 @@ class MechanismRouter:
 
     @property
     def epsilon(self) -> float:
+        # Multiplicative decay: εt = ε0 · decay^t, clamped to epsilon_end.
+        # epsilon_decay is the per-step factor (e.g. 0.992); must be in (0, 1).
+        if 0.0 < self.epsilon_decay < 1.0:
+            return max(self.epsilon_end, self.epsilon_start * (self.epsilon_decay ** self._step))
+        # Legacy: exponential formula if epsilon_decay >= 1 (old configs with decay=50).
         return self.epsilon_end + (self.epsilon_start - self.epsilon_end) * \
                np.exp(-self._step / max(self.epsilon_decay, 1.0))
 

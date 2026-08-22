@@ -1,10 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=condor_hotpot
-#SBATCH --partition=general
+#SBATCH --partition=preempt
+#SBATCH --requeue
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:L40S:3
+#SBATCH --gres=gpu:L40S:5
 #SBATCH --mem=400G
 #SBATCH --time=48:00:00
 #SBATCH --output=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_condor_hotpot.out
@@ -21,9 +22,9 @@ BASELINE_ROOT=${PROJECT_ROOT}/baseline
 export PYTHONPATH="${PROJECT_ROOT}:${BASELINE_ROOT}:${PYTHONPATH:-}"
 
 export TOKENIZERS_PARALLELISM=true
-# GPUs 0,1 → training (FSDP actor/rollout/ref/critic)
-# GPU  2   → local executor vLLM server (no rate limits)
-export CUDA_VISIBLE_DEVICES=0,1,2
+# GPUs 0,1,2,3 → training (FSDP actor/rollout/ref/critic; 2 DP×TP-2 rollout groups)
+# GPU  4       → local executor vLLM server (no rate limits)
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4
 # Disable torch.compile globally: prevents triton 3.2.0 PY_SSIZE_T_CLEAN crash on Python 3.12.
 export TORCHDYNAMO_DISABLE=1
 export DISABLE_FLASH_ATTN_TRITON_CE=1
@@ -101,7 +102,7 @@ fi
 EXECUTOR_CKPT=/data/user_data/jgibson2/condor/checkpoints/sft/qwen2.5_14b_instruct
 EXECUTOR_LOG=${PROJECT_ROOT}/log/slurm_logs/${SLURM_JOB_ID}_executor_vllm.log
 
-CUDA_VISIBLE_DEVICES=2 python -m vllm.entrypoints.openai.api_server \
+CUDA_VISIBLE_DEVICES=4 python -m vllm.entrypoints.openai.api_server \
     --model "${EXECUTOR_CKPT}" \
     --served-model-name llama-3.1-8b-instant \
     --port 8001 \
@@ -137,20 +138,31 @@ fi
 export OPENAI_API_BASE="http://localhost:8001/v1"
 export OPENAI_API_KEY="local"
 
-# Restrict training to GPUs 0,1; GPU 2 is the executor
-export CUDA_VISIBLE_DEVICES=0,1
+# Restrict training to GPUs 0–3; GPU 4 is the executor
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 echo "[SLURM] Job ID        : ${SLURM_JOB_ID}"
 echo "[SLURM] Node          : $(hostname)"
-echo "[SLURM] Training GPUs : ${CUDA_VISIBLE_DEVICES}"
+echo "[SLURM] Training GPUs : 0,1,2,3  Executor GPU: 4"
 echo "[SLURM] Config        : condor_hotpot"
 echo "[SLURM] Start time    : $(date)"
 
-# ── Experiment name: stable across requeues (job ID only, no timestamp) ──────
-EXPERIMENT_NAME="condor_qwen2.5_7b_hotpot_${SLURM_JOB_ID}"
+# ── Stable run ID across preempt requeues ────────────────────────────────────
+# SLURM_JOB_ID changes on every requeue; store the original ID in an NFS file
+# so the checkpoint directory path stays constant across restarts.
+# To start a FRESH run: delete /data/user_data/jgibson2/condor/logs/hotpot_run_id
+RUN_ID_FILE="/data/user_data/jgibson2/condor/logs/hotpot_run_id"
+mkdir -p "$(dirname ${RUN_ID_FILE})"
+if [ ! -f "${RUN_ID_FILE}" ]; then
+    echo "${SLURM_JOB_ID}" > "${RUN_ID_FILE}"
+    echo "[SLURM] Fresh run — stored run ID ${SLURM_JOB_ID} → ${RUN_ID_FILE}"
+fi
+ORIGINAL_JOB_ID=$(cat "${RUN_ID_FILE}")
+EXPERIMENT_NAME="condor_qwen2.5_7b_hotpot_${ORIGINAL_JOB_ID}"
 CKPT_BASE="/data/user_data/jgibson2/condor/checkpoints/rl/verl_condor_hotpot/${EXPERIMENT_NAME}"
+echo "[SLURM] Run ID: ${ORIGINAL_JOB_ID}  (current SLURM_JOB_ID=${SLURM_JOB_ID})"
 
-# ── Auto-resume: scan checkpoint dir for latest global_step on requeue ───────
+# ── Auto-resume: scan stable checkpoint dir for latest global_step ───────────
 RESUME_ARGS="trainer.resume_mode=disable"
 LATEST_CKPT=$(ls -d "${CKPT_BASE}/global_step_"* 2>/dev/null \
     | sort -t_ -k3 -n | tail -1)
@@ -175,6 +187,10 @@ python -m verl.trainer.main_ppo_condor \
 
 EXIT_CODE=$?
 echo "[SLURM] End time: $(date)  Exit code: ${EXIT_CODE}"
+
+# Clean exit → remove run ID file so next sbatch starts a fresh experiment.
+# Preemption exits non-zero, so the file is preserved for the requeue.
+[ ${EXIT_CODE} -eq 0 ] && rm -f "${RUN_ID_FILE}" && echo "[SLURM] Run complete — cleared ${RUN_ID_FILE}"
 
 if [ ${EXIT_CODE} -ne 0 ]; then
     echo "[SLURM] === Ray worker logs (last 150 lines each) ==="

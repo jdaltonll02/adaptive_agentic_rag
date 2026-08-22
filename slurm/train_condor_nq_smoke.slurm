@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=condor_nq_smoke
-#SBATCH --partition=general
+#SBATCH --partition=preempt
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16

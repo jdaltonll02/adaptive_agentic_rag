@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=condor_install
-#SBATCH --partition=general
+#SBATCH --partition=preempt
+#SBATCH --requeue
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4

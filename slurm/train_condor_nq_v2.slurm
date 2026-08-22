@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=condor_nq_v2
-#SBATCH --partition=general
+#SBATCH --partition=preempt
+#SBATCH --requeue
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
@@ -155,9 +156,26 @@ echo "[SLURM] Training GPUs : ${CUDA_VISIBLE_DEVICES}"
 echo "[SLURM] Config        : condor_nq_v2"
 echo "[SLURM] Start time    : $(date)"
 
-# ── Add timestamp suffix to experiment name to avoid W&B collisions ───────────
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-EXPERIMENT_NAME="condor_qwen2.5_7b_nq_v2_${SLURM_JOB_ID}_${TIMESTAMP}"
+# ── Stable run ID across preempt requeues ────────────────────────────────────
+RUN_ID_FILE="/data/user_data/jgibson2/condor/logs/nq_v2_run_id"
+mkdir -p "$(dirname ${RUN_ID_FILE})"
+if [ ! -f "${RUN_ID_FILE}" ]; then
+    echo "${SLURM_JOB_ID}" > "${RUN_ID_FILE}"
+    echo "[SLURM] Fresh run — stored run ID ${SLURM_JOB_ID} → ${RUN_ID_FILE}"
+fi
+ORIGINAL_JOB_ID=$(cat "${RUN_ID_FILE}")
+EXPERIMENT_NAME="condor_qwen2.5_7b_nq_v2_${ORIGINAL_JOB_ID}"
+CKPT_BASE="/data/user_data/jgibson2/condor/checkpoints/rl/verl_condor_nq_v2/${EXPERIMENT_NAME}"
+echo "[SLURM] Run ID: ${ORIGINAL_JOB_ID}  (current SLURM_JOB_ID=${SLURM_JOB_ID})"
+
+# ── Auto-resume: scan stable checkpoint dir for latest global_step ───────────
+RESUME_ARGS="trainer.resume_mode=disable"
+LATEST_CKPT=$(ls -d "${CKPT_BASE}/global_step_"* 2>/dev/null \
+    | sort -t_ -k3 -n | tail -1)
+if [ -n "${LATEST_CKPT}" ]; then
+    echo "[SLURM] Requeue detected — resuming from: ${LATEST_CKPT}"
+    RESUME_ARGS="trainer.resume_mode=resume_path trainer.resume_from_path=${LATEST_CKPT}"
+fi
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 cd ${PROJECT_ROOT}
@@ -169,10 +187,14 @@ python -m verl.trainer.main_ppo_condor \
     "wandb.experiment=${EXPERIMENT_NAME}" \
     "paths.sft_checkpoint=${LOCAL_7B}" \
     "actor_rollout_ref.rollout.gpu_memory_utilization=${GMU}" \
+    "trainer.default_local_dir=${CKPT_BASE}" \
+    ${RESUME_ARGS} \
     "$@"
 
 EXIT_CODE=$?
 echo "[SLURM] End time: $(date)  Exit code: ${EXIT_CODE}"
+
+[ ${EXIT_CODE} -eq 0 ] && rm -f "${RUN_ID_FILE}" && echo "[SLURM] Run complete — cleared ${RUN_ID_FILE}"
 
 if [ ${EXIT_CODE} -ne 0 ]; then
     echo "[SLURM] === Ray worker logs (last 150 lines each) ==="
