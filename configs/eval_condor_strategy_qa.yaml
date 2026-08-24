@@ -1,0 +1,54 @@
+# eval_condor_strategy_qa.yaml — evaluation on StrategyQA
+
+defaults:
+  - condor_nq
+  - _self_
+
+wandb:
+  project: verl_condor_eval
+  experiment: condor_eval_strategy_qa
+
+data:
+  val_files:    ["${paths.strategy_qa.test}"]
+  val_dataset:  strategyqa
+  val_batch_size: 32
+  max_prompt_length: 1024
+  max_response_length: 16
+  prompt_key: prompt
+  trust_remote_code: false
+
+eval:
+  checkpoint_path: "${paths.rl_checkpoint_dir}/latest"
+  router_checkpoint: null
+  max_turn: 5
+  eval_batch_size: 8
+
+trainer:
+  project_name:     "${wandb.project}"
+  experiment_name:  "${wandb.experiment}"
+  logger:           [wandb]
+  n_gpus_per_node:  1
+  nnodes:           1
+  ray_num_cpus:     null
+  log_dir:          "${paths.logs_dir}"
+  metrics_dir:      "${paths.metrics_dir}"
+  plots_dir:        "${paths.plots_dir}"
+  checkpoint_dir:   "${paths.rl_checkpoint_dir}"
+
+condor:
+  use_condor: true
+  l0_reward_threshold: 0.5
+  epsilon_start: 0.0
+  epsilon_end:   0.0
+  epsilon_decay: 1.0
+
+# ── Eval-mode overrides (applied on top of condor_nq base) ────────────────────
+trainer:
+  val_only: true
+  val_before_train: true
+  n_gpus_per_node: 1
+  total_epochs: 1
+
+actor_rollout_ref:
+  rollout:
+    tensor_model_parallel_size: 1

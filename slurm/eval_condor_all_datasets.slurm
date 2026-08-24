@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:L40S:1
 #SBATCH --mem=64G
-#SBATCH --time=12:00:00
+#SBATCH --time=20:00:00
 #SBATCH --output=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_eval_all.out
 #SBATCH --error=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_eval_all.err
 #SBATCH --mail-type=BEGIN,END,FAIL
@@ -63,8 +63,8 @@ BASE_EXP="condor_eval_all_${SLURM_JOB_ID}_${TIMESTAMP}"
 cd ${PROJECT_ROOT}
 
 # ── Per-dataset evaluation ────────────────────────────────────────────────────
-DATASETS=(nq hotpot ambigqa 2wiki musique bamboogle popqa)
-CONFIGS=(eval_condor_nq eval_condor_hotpot eval_condor_ambigqa eval_condor_2wiki eval_condor_musique eval_condor_bamboogle eval_condor_popqa)
+DATASETS=(nq hotpot ambigqa 2wiki musique bamboogle popqa frames strategyqa cwq triviaqa kilt_nq)
+CONFIGS=(eval_condor_nq eval_condor_hotpot eval_condor_ambigqa eval_condor_2wiki eval_condor_musique eval_condor_bamboogle eval_condor_popqa eval_condor_frames eval_condor_strategy_qa eval_condor_cwq eval_condor_triviaqa eval_condor_kilt_nq)
 
 OVERALL_EXIT=0
 

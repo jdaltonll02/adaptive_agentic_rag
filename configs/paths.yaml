@@ -52,6 +52,24 @@ paths:
   pop_qa:
     test:   /data/user_data/jgibson2/condor/data/pop_qa/test_996.parquet
 
+  frames:
+    test:   /data/user_data/jgibson2/condor/data/frames/test_996.parquet
+
+  strategy_qa:
+    train:  /data/user_data/jgibson2/condor/data/strategy_qa/train.parquet
+    test:   /data/user_data/jgibson2/condor/data/strategy_qa/test_996.parquet
+
+  cwq:
+    train:  /data/user_data/jgibson2/condor/data/cwq/train.parquet
+    test:   /data/user_data/jgibson2/condor/data/cwq/test_996.parquet
+
+  trivia_qa:
+    train:  /data/user_data/jgibson2/condor/data/trivia_qa/train.parquet
+    test:   /data/user_data/jgibson2/condor/data/trivia_qa/test_996.parquet
+
+  kilt_nq:
+    test:   /data/user_data/jgibson2/condor/data/kilt_nq/test_996.parquet
+
   # ── Model checkpoints ───────────────────────────────────────────────────────
   # L1 PlanningAgent (actor trained via PPO) — Qwen2.5-7B-Instruct
   sft_checkpoint:         /data/user_data/jgibson2/condor/checkpoints/sft/qwen2.5_7b_instruct
