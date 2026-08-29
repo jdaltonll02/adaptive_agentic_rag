@@ -222,14 +222,14 @@ critic:
     wrap_policy:
       min_num_params: 0
     param_offload:         false
-    optimizer_offload:     false
+    optimizer_offload:     true
     offload_policy:        false
     reshard_after_forward: true
     fsdp_size:             -1
 
 # ── Algorithm ─────────────────────────────────────────────────────────────────
 algorithm:
-  adv_estimator:          grpo
+  adv_estimator:          gae
   gamma:                  1.0
   lam:                    0.95
   use_kl_in_reward:       true
