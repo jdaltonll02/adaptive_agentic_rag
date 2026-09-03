@@ -73,6 +73,9 @@ echo "[SLURM] Retriever cached locally ($(du -sh ${LOCAL_RETRIEVER} | cut -f1))"
 export RETRIEVER_ROOT=${LOCAL_RETRIEVER}
 RETRIEVAL_LOG=${PROJECT_ROOT}/log/slurm_logs/${SLURM_JOB_ID}_retrieval_server_gae.log
 
+# Kill any stale process holding port 8000 from a prior job on this node
+fuser -k 8000/tcp 2>/dev/null || true; sleep 2
+
 python ${PROJECT_ROOT}/scripts/start_retrieval_server.py > ${RETRIEVAL_LOG} 2>&1 &
 RETRIEVAL_PID=$!
 trap "kill ${RETRIEVAL_PID} ${EXECUTOR_PID} 2>/dev/null; rm -rf ${LOCAL_7B} ${LOCAL_RETRIEVER}" EXIT
