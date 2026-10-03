@@ -166,7 +166,7 @@ echo "[SLURM] Run ID: ${ORIGINAL_JOB_ID}  (current SLURM_JOB_ID=${SLURM_JOB_ID})
 # ── Auto-resume: scan stable checkpoint dir for latest global_step ───────────
 RESUME_ARGS="trainer.resume_mode=disable"
 LATEST_CKPT=$(ls -d "${CKPT_BASE}/global_step_"* 2>/dev/null \
-    | sort -t_ -k3 -n | tail -1)
+    | sort -V | tail -1)
 if [ -n "${LATEST_CKPT}" ]; then
     echo "[SLURM] Requeue detected — resuming from: ${LATEST_CKPT}"
     RESUME_ARGS="trainer.resume_mode=resume_path trainer.resume_from_path=${LATEST_CKPT}"

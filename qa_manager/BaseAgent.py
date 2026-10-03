@@ -80,7 +80,7 @@ class RetrievalAgent(_BaselineRetrievalAgent):
             # Fall back to standard retrieval if retriever not available
             return super().run(context)
 
-        api_url = getattr(self, 'api_url', 'http://localhost:8000/search')
+        api_url = getattr(self, 'api_url', None) or os.environ.get("RETRIEVAL_API_URL", "http://localhost:8000/search")
         num_results = getattr(self, 'num_results', 5)
         retriever = GraphRetriever(api_url=api_url, num_results=num_results)
 

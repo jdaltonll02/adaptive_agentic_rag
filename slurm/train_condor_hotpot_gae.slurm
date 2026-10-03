@@ -73,18 +73,20 @@ echo "[SLURM] Retriever cached locally ($(du -sh ${LOCAL_RETRIEVER} | cut -f1))"
 export RETRIEVER_ROOT=${LOCAL_RETRIEVER}
 RETRIEVAL_LOG=${PROJECT_ROOT}/log/slurm_logs/${SLURM_JOB_ID}_retrieval_server_gae.log
 
-# Kill any stale process holding port 8000 from a prior job on this node
-fuser -k 8000/tcp 2>/dev/null || true; sleep 2
+# Use a job-specific port to avoid collisions when two jobs land on the same node
+export RETRIEVAL_PORT=$((8000 + SLURM_JOB_ID % 1000))
+export RETRIEVAL_API_URL="http://localhost:${RETRIEVAL_PORT}/search"
+echo "[SLURM] Retrieval server port: ${RETRIEVAL_PORT}"
 
 python ${PROJECT_ROOT}/scripts/start_retrieval_server.py > ${RETRIEVAL_LOG} 2>&1 &
 RETRIEVAL_PID=$!
-trap "kill ${RETRIEVAL_PID} ${EXECUTOR_PID} 2>/dev/null; rm -rf ${LOCAL_7B} ${LOCAL_RETRIEVER}" EXIT
+trap "kill ${RETRIEVAL_PID} ${EXECUTOR_PID} ${HF_BACKUP_PID} 2>/dev/null; rm -rf ${LOCAL_7B} ${LOCAL_RETRIEVER}" EXIT
 
 echo "[SLURM] Retrieval server PID: ${RETRIEVAL_PID}  (log: ${RETRIEVAL_LOG})"
-echo "[SLURM] Waiting for retrieval server on port 8000 (FAISS index load ~25 min)..."
+echo "[SLURM] Waiting for retrieval server on port ${RETRIEVAL_PORT} (FAISS index load ~25 min)..."
 RETRIEVAL_READY=0
 for i in $(seq 1 360); do
-    if curl -sf http://localhost:8000/search -d '{"questions":["test"],"N":1}' -H 'Content-Type: application/json' > /dev/null 2>&1; then
+    if curl -sf http://localhost:${RETRIEVAL_PORT}/search -d '{"questions":["test"],"N":1}' -H 'Content-Type: application/json' > /dev/null 2>&1; then
         echo "[SLURM] Retrieval server ready (${i}s)"
         RETRIEVAL_READY=1
         break
@@ -163,11 +165,24 @@ echo "[SLURM] Run ID: ${ORIGINAL_JOB_ID}  (current SLURM_JOB_ID=${SLURM_JOB_ID})
 # ── Auto-resume: scan stable checkpoint dir for latest global_step ───────────
 RESUME_ARGS="trainer.resume_mode=disable"
 LATEST_CKPT=$(ls -d "${CKPT_BASE}/global_step_"* 2>/dev/null \
-    | sort -t_ -k3 -n | tail -1)
+    | sort -V | tail -1)
 if [ -n "${LATEST_CKPT}" ]; then
     echo "[SLURM] Requeue detected — resuming from: ${LATEST_CKPT}"
     RESUME_ARGS="trainer.resume_mode=resume_path trainer.resume_from_path=${LATEST_CKPT}"
 fi
+
+# ── HuggingFace milestone backup (actor model weights at steps 100/200/300) ──
+HF_REPO="jdaltonII02/condor-hotpot-gae"
+HF_BACKUP_LOG=${PROJECT_ROOT}/log/slurm_logs/${SLURM_JOB_ID}_hf_backup.log
+python ${PROJECT_ROOT}/scripts/hf_milestone_backup.py \
+    --ckpt_dir   "${CKPT_BASE}" \
+    --experiment "${EXPERIMENT_NAME}" \
+    --repo_id    "${HF_REPO}" \
+    --milestones 100 200 300 \
+    --poll_interval 120 \
+    > ${HF_BACKUP_LOG} 2>&1 &
+HF_BACKUP_PID=$!
+echo "[SLURM] HF backup watcher PID: ${HF_BACKUP_PID}  (log: ${HF_BACKUP_LOG})"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 cd ${PROJECT_ROOT}

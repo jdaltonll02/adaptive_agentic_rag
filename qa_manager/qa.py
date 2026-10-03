@@ -13,6 +13,7 @@ When m_star is None (or extra_info does not carry m_star), the code
 behaves identically to the baseline.
 """
 
+import os
 import numpy as np
 from typing import Dict, List, Any, Optional
 
@@ -54,7 +55,7 @@ class Agentic_RAG_Manager:
         self.return_full_prompt = config.get("return_full_prompt", False)
         self.truncation = config.get("truncation", "right")
 
-        self.api_url = 'http://localhost:8000/search'
+        self.api_url = os.environ.get("RETRIEVAL_API_URL", "http://localhost:8000/search")
 
     def trans_rawprompt_to_ids(self, batch_dict, is_sub_list):
         """Tokenise planning messages.
