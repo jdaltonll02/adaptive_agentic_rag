@@ -2,13 +2,13 @@
 
 Prepares KILT-NQ (kilt_tasks, nq config) for CONDOR evaluation.
 
-NOTE: KILT provenance scoring is NOT implemented — only answer-string F1 is
-used.  Provenance evaluation (page-level and passage-level) would require
-integrating the official KILT evaluation library.
+Provenance titles from the KILT output field are stored in extra_info so that
+the eval script can compute page-level R-precision (retrieved titles vs. gold
+Wikipedia page titles).  This is the standard lightweight KILT provenance
+metric used in RAG papers without the full KILT eval library.
 
 KILT-NQ uses the same Natural Questions questions as the original NQ dataset
-but maps each answer to a Wikipedia passage as provenance.  Since we evaluate
-answer F1 only, the provenance fields are ignored.
+but maps each answer to a Wikipedia passage as provenance.
 
 Splits
 ------
@@ -70,11 +70,37 @@ def _extract_answers(output_field) -> list:
     return [""]
 
 
+def _extract_provenance_titles(output_field) -> list:
+    """Extract gold Wikipedia page titles from KILT provenance field.
+
+    Each output entry may have a "provenance" list of dicts with a "title" key.
+    We collect all unique titles across all output entries (some questions have
+    multiple valid provenance pages).
+    """
+    if not output_field:
+        return []
+    seen = set()
+    titles = []
+    entries = output_field if isinstance(output_field, list) else [output_field]
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        for prov in (entry.get("provenance") or []):
+            if not isinstance(prov, dict):
+                continue
+            title = prov.get("title", "")
+            if title and title not in seen:
+                seen.add(title)
+                titles.append(title)
+    return titles
+
+
 def make_map_fn(split: str):
     def process_fn(example, idx):
         question_raw = example.get("input", "")
         output_field = example.get("output", [])
         ground_truth = _extract_answers(output_field)
+        provenance_titles = _extract_provenance_titles(output_field)
         mechanism_label = _oracle_mechanism(question_raw)
         return {
             "data_source": DATA_SOURCE,
@@ -87,6 +113,7 @@ def make_map_fn(split: str):
                 "answer": ground_truth,
                 "question": question_raw,
                 "mechanism_label": mechanism_label,
+                "provenance_titles": provenance_titles,
             },
         }
     return process_fn

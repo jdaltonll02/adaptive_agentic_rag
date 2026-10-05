@@ -120,6 +120,16 @@ def compute_em(prediction: str, ground_truths) -> float:
     return float(any(norm_pred == normalize_answer(gt) for gt in ground_truths))
 
 
+def compute_provenance_rprecision(retrieved_titles: list, gold_titles: list) -> float:
+    """Page-level R-precision: precision at |gold_titles| retrieved titles."""
+    if not gold_titles:
+        return 0.0
+    k = len(gold_titles)
+    gold_norm = {normalize_answer(t) for t in gold_titles}
+    hits = sum(1 for t in retrieved_titles[:k] if normalize_answer(t) in gold_norm)
+    return hits / k
+
+
 # ---------------------------------------------------------------------------
 # Evaluation loop
 # ---------------------------------------------------------------------------
@@ -306,6 +316,19 @@ def run_eval(config: DictConfig) -> None:
                 workflow=str(ctx.get('workflow', '')),
                 l0_correct=float(prm.l0_correct(f1, l0_threshold)),
             )
+
+            if dataset_name == 'kilt_nq':
+                row = batch_rows[qi]
+                extra = row.get('extra_info', {})
+                if isinstance(extra, str):
+                    try:
+                        extra = json.loads(extra)
+                    except Exception:
+                        extra = {}
+                gold_titles = extra.get('provenance_titles', []) or []
+                retrieved = ctx.get('retrieved_titles', []) or []
+                record['prov_rprecision'] = compute_provenance_rprecision(retrieved, gold_titles)
+
             per_query_records.append(record)
 
     # ---- Flush eval metrics ----
@@ -358,6 +381,9 @@ def run_eval(config: DictConfig) -> None:
     print(f'Eval complete — {len(per_query_records)} queries on {dataset_name}')
     print(f'  F1:             {total_f1 * 100:.2f}%')
     print(f'  EM:             {total_em * 100:.2f}%')
+    if dataset_name == 'kilt_nq' and per_query_records and 'prov_rprecision' in per_query_records[0]:
+        prov_rp = float(np.mean([r.get('prov_rprecision', 0.0) for r in per_query_records]))
+        print(f'  Prov R-prec:    {prov_rp * 100:.2f}%')
     print(f'  Token cost:     {total_tc:.3f} mUSD/query')
     print(f'  Retrieval calls:{total_ret:.2f}/query')
     mech_counts = defaultdict(int)

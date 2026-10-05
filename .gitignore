@@ -95,3 +95,4 @@ wandb_key.txt
 # Project-specific large directories (stored in /data/user_data/jgibson2/)
 checkpoints/
 condor_data/
+baseline/

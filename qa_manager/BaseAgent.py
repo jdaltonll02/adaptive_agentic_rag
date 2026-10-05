@@ -64,11 +64,34 @@ class RetrievalAgent(_BaselineRetrievalAgent):
         m_star = context.get('m_star', 1)
 
         if m_star == 3:
-            return self._run_graph(context)
+            result = self._run_graph(context)
         elif m_star == 4:
-            return self._run_web(context)
+            result = self._run_web(context)
         else:
-            return super().run(context)
+            result = super().run(context)
+
+        self._accumulate_retrieved_titles(context)
+        return result
+
+    def _accumulate_retrieved_titles(self, context: dict) -> None:
+        """Parse title\ntext docs from context['results'] and accumulate unique titles."""
+        mode = context.get('mode', 'normal')
+        results = context.get('results') or []
+        if mode in ('serial', 'parallel'):
+            step = context.get('current_step', 0)
+            docs = results[step] if step < len(results) else []
+        else:
+            docs = results[0] if results else []
+
+        seen = set(context.get('retrieved_titles', []))
+        accumulated = context.setdefault('retrieved_titles', [])
+        for doc in (docs or []):
+            if not isinstance(doc, str):
+                continue
+            title = doc.split('\n', 1)[0].strip()
+            if title and title not in seen:
+                seen.add(title)
+                accumulated.append(title)
 
     # ------------------------------------------------------------------
     # m3: Graph RAG

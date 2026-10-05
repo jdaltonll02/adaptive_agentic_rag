@@ -12,7 +12,7 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=dalton.edu02@gmail.com
 
-# Downloads and prepares five new benchmark datasets for CONDOR evaluation
+# Downloads and prepares six benchmark datasets for CONDOR evaluation
 # (and future training).  CPU-only job — no GPU required.
 #
 # Datasets prepared:
@@ -21,6 +21,7 @@
 #   3. CWQ             → condor/data/cwq/{train,test_996}.parquet
 #   4. TriviaQA        → condor/data/trivia_qa/{train,test_996}.parquet
 #   5. KILT-NQ         → condor/data/kilt_nq/test_996.parquet
+#   6. MuSiQue         → condor/data/musique/{train,test_996}.parquet
 #
 # Usage
 #   sbatch slurm/setup_new_benchmarks.slurm
@@ -45,6 +46,7 @@ mkdir -p "${CONDOR_DATA}/strategy_qa"
 mkdir -p "${CONDOR_DATA}/cwq"
 mkdir -p "${CONDOR_DATA}/trivia_qa"
 mkdir -p "${CONDOR_DATA}/kilt_nq"
+mkdir -p "${CONDOR_DATA}/musique"
 
 cd "${PROJECT_ROOT}"
 
@@ -53,7 +55,7 @@ OVERALL_EXIT=0
 # ── 1. FRAMES ─────────────────────────────────────────────────────────────────
 echo ""
 echo "========================================"
-echo "[setup] 1/5  FRAMES (google/frames-benchmark)"
+echo "[setup] 1/6  FRAMES (google/frames-benchmark)"
 echo "========================================"
 python -m data.frames --local-dir "${CONDOR_DATA}/frames"
 STATUS=$?
@@ -67,7 +69,7 @@ fi
 # ── 2. StrategyQA ─────────────────────────────────────────────────────────────
 echo ""
 echo "========================================"
-echo "[setup] 2/5  StrategyQA (ChilleD/StrategyQA)"
+echo "[setup] 2/6  StrategyQA (ChilleD/StrategyQA)"
 echo "========================================"
 python -m data.strategy_qa --local-dir "${CONDOR_DATA}/strategy_qa"
 STATUS=$?
@@ -81,7 +83,7 @@ fi
 # ── 3. ComplexWebQuestions ────────────────────────────────────────────────────
 echo ""
 echo "========================================"
-echo "[setup] 3/5  ComplexWebQuestions (rmanluo/RoG-cwq)"
+echo "[setup] 3/6  ComplexWebQuestions (rmanluo/RoG-cwq)"
 echo "========================================"
 python -m data.complex_web_questions --local-dir "${CONDOR_DATA}/cwq"
 STATUS=$?
@@ -95,7 +97,7 @@ fi
 # ── 4. TriviaQA ───────────────────────────────────────────────────────────────
 echo ""
 echo "========================================"
-echo "[setup] 4/5  TriviaQA (mandarjoshi/trivia_qa, rc.nocontext)"
+echo "[setup] 4/6  TriviaQA (mandarjoshi/trivia_qa, rc.nocontext)"
 echo "========================================"
 python -m data.trivia_qa --local-dir "${CONDOR_DATA}/trivia_qa"
 STATUS=$?
@@ -109,7 +111,7 @@ fi
 # ── 5. KILT-NQ ────────────────────────────────────────────────────────────────
 echo ""
 echo "========================================"
-echo "[setup] 5/5  KILT-NQ (facebook/kilt_tasks, nq)"
+echo "[setup] 5/6  KILT-NQ (facebook/kilt_tasks, nq)"
 echo "========================================"
 python -m data.kilt --local-dir "${CONDOR_DATA}/kilt_nq"
 STATUS=$?
@@ -118,6 +120,20 @@ if [ ${STATUS} -ne 0 ]; then
     OVERALL_EXIT=${STATUS}
 else
     echo "[setup] kilt_nq OK"
+fi
+
+# ── 6. MuSiQue ────────────────────────────────────────────────────────────────
+echo ""
+echo "========================================"
+echo "[setup] 6/6  MuSiQue (bdsaglam/musique, answerable)"
+echo "========================================"
+python -m data.musique --local-dir "${CONDOR_DATA}/musique"
+STATUS=$?
+if [ ${STATUS} -ne 0 ]; then
+    echo "[setup] WARNING: musique exited with code ${STATUS}"
+    OVERALL_EXIT=${STATUS}
+else
+    echo "[setup] musique OK"
 fi
 
 echo ""
