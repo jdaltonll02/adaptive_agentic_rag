@@ -1,12 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=condor_eval_all
 #SBATCH --partition=preempt
+#SBATCH --qos=preempt_qos
 #SBATCH --requeue
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:L40S:1
-#SBATCH --mem=64G
+#SBATCH --mem=192G
 #SBATCH --time=20:00:00
 #SBATCH --output=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_eval_all.out
 #SBATCH --error=/home/jgibson2/projects/adaptive_rag/log/slurm_logs/%j_eval_all.err
@@ -30,10 +31,16 @@ BASELINE_ROOT=${PROJECT_ROOT}/baseline
 export PYTHONPATH="${PROJECT_ROOT}:${BASELINE_ROOT}:${PYTHONPATH:-}"
 export TOKENIZERS_PARALLELISM=true
 
-# LLM API credentials (CMU gateway)
-export OPENAI_API_BASE="${OPENAI_BASE_URL:-https://ai-gateway.andrew.cmu.edu}"
+# LLM API credentials (OpenRouter — OpenAI-compatible)
+export OPENAI_API_BASE="${OPENAI_API_BASE:-https://openrouter.ai/api/v1}"
 export OPENAI_API_KEY="${OPENAI_API_KEY}"
+export CONDOR_AGENT_MODEL="${CONDOR_AGENT_MODEL:-google/gemini-2.5-flash-lite}"
 export CUDA_VISIBLE_DEVICES=0
+export DISABLE_FLASH_ATTN_TRITON_CE=1
+
+# Job-specific Ray temp dir to avoid stale /tmp/ray permission conflicts on requeue
+export RAY_TMPDIR=/tmp/ray_${SLURM_JOB_ID}
+mkdir -p ${RAY_TMPDIR}
 
 # ── Retrieval server ──────────────────────────────────────────────────────────
 export RETRIEVER_ROOT=/data/user_data/jgibson2/condor/retriever
@@ -78,7 +85,7 @@ for i in "${!DATASETS[@]}"; do
     echo "[eval] Dataset: ${DS}  Config: ${CFG}"
     echo "========================================"
 
-    python -m verl.trainer.main_eval_condor \
+    python "${BASELINE_ROOT}/verl/trainer/main_eval_condor.py" \
         --config-path "${PROJECT_ROOT}/configs" \
         --config-name  "${CFG}" \
         "wandb.experiment=${EXP}" \

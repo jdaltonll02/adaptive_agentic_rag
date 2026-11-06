@@ -43,6 +43,9 @@ trainer:
   metrics_dir:      "${paths.metrics_dir}"
   plots_dir:        "${paths.plots_dir}"
   checkpoint_dir:   "${paths.rl_checkpoint_dir}"
+  val_only:         true
+  val_before_train: true
+  total_epochs:     1
 
 # ── CONDOR (router behaviour during eval) ────────────────────────────────────
 condor:
@@ -52,13 +55,16 @@ condor:
   epsilon_end:   0.0
   epsilon_decay: 1.0
 
-# ── Eval-mode overrides (applied on top of condor_nq base) ────────────────────
-trainer:
-  val_only: true
-  val_before_train: true
-  n_gpus_per_node: 1
-  total_epochs: 1
+
+# ── Algorithm overrides for eval (disables critic) ───────────────────────────
+algorithm:
+  use_kl_in_reward: false
+  adv_estimator: grpo
 
 actor_rollout_ref:
   rollout:
     tensor_model_parallel_size: 1
+    gpu_memory_utilization: 0.8
+  actor:
+    fsdp_config:
+      model_dtype: bfloat16

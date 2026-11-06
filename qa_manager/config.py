@@ -10,10 +10,15 @@ import os
 import sys
 
 # ------------------------------------------------------------------
-# Mirror the baseline API settings (can be overridden via env vars)
+# API settings — driven entirely by environment variables.
+# For Google AI Studio (recommended):
+#   export OPENAI_API_KEY="<your-aistudio-key>"
+#   export OPENAI_API_BASE="https://generativelanguage.googleapis.com/v1beta/openai/"
+#   export CONDOR_AGENT_MODEL="gemini-2.0-flash"   # optional, defaults below
 # ------------------------------------------------------------------
 API_KEY = os.environ.get("OPENAI_API_KEY", "")
-API_BASE = os.environ.get("OPENAI_API_BASE", "https://api.openai-proxy.org/v1")
+API_BASE = os.environ.get("OPENAI_API_BASE", "https://generativelanguage.googleapis.com/v1beta/openai/")
+AGENT_MODEL = os.environ.get("CONDOR_AGENT_MODEL", "gemini-2.0-flash")
 
 COMMON_CONFIG = {
     'api_key': API_KEY,
@@ -27,7 +32,7 @@ AGENT_CONFIG = {
     "QueryRewriteAgent": {
         **COMMON_CONFIG,
         'name': 'QueryRewriteAgent',
-        'model': 'llama-3.1-8b-instant',
+        'model': AGENT_MODEL,
         'temperature': 0,
         'max_tokens': 256,
         'timeout': 300,
@@ -35,7 +40,7 @@ AGENT_CONFIG = {
     "QueryDecompositionAgentParallel": {
         **COMMON_CONFIG,
         'name': 'QueryDecompositionAgentParallel',
-        'model': 'llama-3.1-8b-instant',
+        'model': AGENT_MODEL,
         'temperature': 0,
         'max_tokens': 256,
         'timeout': 300,
@@ -43,7 +48,7 @@ AGENT_CONFIG = {
     "QueryDecompositionAgentSerial": {
         **COMMON_CONFIG,
         'name': 'QueryDecompositionAgentSerial',
-        'model': 'llama-3.1-8b-instant',
+        'model': AGENT_MODEL,
         'temperature': 0,
         'max_tokens': 256,
         'timeout': 300,
@@ -51,7 +56,7 @@ AGENT_CONFIG = {
     "DocumentSelectionAgent": {
         **COMMON_CONFIG,
         'name': 'DocumentSelectionAgent',
-        'model': 'llama-3.1-8b-instant',
+        'model': AGENT_MODEL,
         'temperature': 0,
         'max_tokens': 256,
         'timeout': 300,
@@ -59,7 +64,7 @@ AGENT_CONFIG = {
     "AnswerGenerationAgent": {
         **COMMON_CONFIG,
         'name': 'AnswerGenerationAgent',
-        'model': 'llama-3.1-8b-instant',
+        'model': AGENT_MODEL,
         'temperature': 0,
         'max_tokens': 256,
         'timeout': 300,
@@ -67,7 +72,7 @@ AGENT_CONFIG = {
     "RetrievalAgent": {
         **COMMON_CONFIG,
         'name': 'RetrievalAgent',
-        'model': 'llama-3.1-8b-instant',
+        'model': AGENT_MODEL,
         'temperature': 0,
         'max_tokens': 256,
         'timeout': 300,
@@ -77,7 +82,7 @@ AGENT_CONFIG = {
     "AnswerSummarizationAgent": {
         **COMMON_CONFIG,
         'name': 'AnswerSummarizationAgent',
-        'model': 'llama-3.1-8b-instant',
+        'model': AGENT_MODEL,
         'temperature': 0,
         'max_tokens': 256,
         'timeout': 300,

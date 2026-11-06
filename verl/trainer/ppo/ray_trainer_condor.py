@@ -54,20 +54,14 @@ for _p in [_PROJECT_ROOT, _BASELINE_ROOT]:
 # ---------------------------------------------------------------------------
 from verl.trainer.ppo.ray_trainer_agentic_rag_2 import (  # noqa: E402
     RayPPOTrainer,
-    RewardManager,
     run_workflow,
     init_context_1turn_list,
     convert_to_shared_structure,
     convert_to_local_structure,
 )
+from verl.trainer.main_ppo_agentic_rag import RewardManager  # noqa: E402
 from verl.utils.tracking import Tracking  # noqa: E402
 
-# Baseline verl utilities used by baseline trainer
-try:
-    from verl.trainer.ppo.core_algos import compute_advantage, apply_kl_penalty, agg_loss  # noqa: E402
-    from verl.utils.seqlen_balancing import get_seqlen_balancing_stats  # noqa: E402
-except ImportError as e:
-    raise ImportError(f"Required baseline verl utilities not found: {e}") from e
 
 # ---------------------------------------------------------------------------
 # CONDOR imports (from project root)

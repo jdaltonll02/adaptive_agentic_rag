@@ -26,7 +26,7 @@ import sys
 # Path setup
 # ---------------------------------------------------------------------------
 _PROJECT_ROOT = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..')
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 )
 _BASELINE_ROOT = os.path.join(_PROJECT_ROOT, 'baseline')
 
@@ -49,15 +49,27 @@ from transformers import AutoTokenizer
 
 # Baseline verl infrastructure
 from verl import DataProto
-from verl.trainer.ppo.ray_trainer_agentic_rag_2 import RewardManager as BaseRewardManager
 from verl.utils.fs import copy_local_path_from_hdfs
 from verl.workers.fsdp_workers import ActorRolloutRefWorker, CriticWorker
-from verl.utils.ray_utils import RoleEnum as Role
+from verl.trainer.ppo.ray_trainer_agentic_rag_2 import Role, ResourcePoolManager
 from verl.single_controller.ray import RayClassWithInitArgs, RayWorkerGroup
-from verl.trainer.ppo.ray_trainer_agentic_rag_2 import ResourcePoolManager
 
 # CONDOR trainer
 from verl.trainer.ppo.ray_trainer_condor import CONDORRayPPOTrainer, CONDORRewardManager  # noqa: E402
+
+# Re-export symbols the baseline eval script imports from this module.
+# Use spec_from_file_location so we bypass Python's import cache and load the
+# baseline file directly, avoiding the recursive-import that import_module would cause.
+import importlib.util as _util, os as _os
+_spec = _util.spec_from_file_location(
+    '_baseline_main_ppo_condor',
+    _os.path.join(_BASELINE_ROOT, 'verl', 'trainer', 'main_ppo_condor.py'),
+)
+_bmod = _util.module_from_spec(_spec)
+_spec.loader.exec_module(_bmod)
+CondorRewardManager = _bmod.CondorRewardManager
+_create_rl_dataset = _bmod._create_rl_dataset
+_create_rl_sampler = _bmod._create_rl_sampler
 
 # ---------------------------------------------------------------------------
 # Dataset / metric helpers (copied from baseline main_ppo_agentic_rag.py)

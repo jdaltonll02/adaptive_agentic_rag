@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=condor_bench_setup
 #SBATCH --partition=preempt
+#SBATCH --qos=preempt_cpu_qos
 #SBATCH --requeue
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

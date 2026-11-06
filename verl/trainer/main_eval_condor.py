@@ -73,12 +73,39 @@ from qa_manager.BaseAgent import AgentPool
 
 # Baseline trainer utilities
 from verl.trainer.ppo.ray_trainer_agentic_rag_2 import (
-    RewardManager,
     run_workflow,
-    init_context_1turn_list,
     convert_to_shared_structure,
     convert_to_local_structure,
 )
+
+
+def init_context_1turn_list(questions: list, MAX_TURN: int) -> list:
+    """Build per-query context dicts without requiring a tokenised batch tensor."""
+    contexts = []
+    for q in questions:
+        contexts.append({
+            "original_query": q,
+            "query": q,
+            "mode": "normal",
+            "is_sub": False,
+            "results": [[]],
+            "sub_query": [],
+            "sub_answer": [],
+            "begin_step": -1,
+            "end_step": MAX_TURN,
+            "current_step": -1,
+            "token_cost": {
+                "QueryRewriteAgent": 0.0,
+                "QueryDecompositionAgentParallel": 0.0,
+                "QueryDecompositionAgentSerial": 0.0,
+                "DocumentSelectionAgent": 0.0,
+                "QueryReAnswerGenerationAgentwriteAgent": 0.0,
+                "AnswerSummarizationAgent": 0.0,
+                "RetrievalAgent": 0.0,
+            },
+            "answer": "",
+        })
+    return contexts
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +182,13 @@ def run_eval(config: DictConfig) -> None:
     # ---- Ray ----
     if not ray.is_initialized():
         ray.init(
-            runtime_env={'env_vars': {'TOKENIZERS_PARALLELISM': 'true'}},
+            runtime_env={'env_vars': {
+                'TOKENIZERS_PARALLELISM': 'true',
+                'OPENAI_API_KEY': os.environ.get('OPENAI_API_KEY', ''),
+                'OPENAI_API_BASE': os.environ.get('OPENAI_API_BASE', 'https://openrouter.ai/api/v1'),
+                'CONDOR_AGENT_MODEL': os.environ.get('CONDOR_AGENT_MODEL', 'google/gemini-2.5-flash-lite'),
+                'DISABLE_FLASH_ATTN_TRITON_CE': os.environ.get('DISABLE_FLASH_ATTN_TRITON_CE', '0'),
+            }},
             num_cpus=config.trainer.get('ray_num_cpus', None),
         )
 
@@ -171,7 +204,6 @@ def run_eval(config: DictConfig) -> None:
         import torch
         router.policy.load_state_dict(torch.load(str(config.eval.router_checkpoint)))
 
-    reward_manager = RewardManager(tokenizer)
     prm = ProcessRewardModel()
     l0_threshold = float(config.condor.get('l0_reward_threshold', 0.4))
 
@@ -216,15 +248,7 @@ def run_eval(config: DictConfig) -> None:
             qtype_list.append(qt)
             features_list.append(feat)
 
-        # Build dummy batch_dict for context initialisation
-        batch_dict = {
-            'extra_info': [
-                {'question': q, 'answer': a, 'm_star': m, 'qtype_id': qt}
-                for q, a, m, qt in zip(questions, golden_answers, m_star_list, qtype_list)
-            ]
-        }
-
-        context_list = init_context_1turn_list(batch_dict, MAX_TURN)
+        context_list = init_context_1turn_list(questions, MAX_TURN)
         for ctx, m in zip(context_list, m_star_list):
             ctx['m_star'] = m
 
@@ -236,7 +260,16 @@ def run_eval(config: DictConfig) -> None:
             # Build a minimal batch for rollout — evaluation uses generate() directly
             # using the agentic manager to format prompts
             is_legal_list = [True] * len(questions)
-            workflows_1turn = [None] * len(questions)
+            # Default workflows per mechanism (parse_workflow expects a list of abbreviations)
+            _default_wf = {
+                0: ['AS'],
+                1: ['R', 'DS', 'AG'],
+                2: ['QDP', 'R', 'DS', 'AG'],
+                3: ['R', 'DS', 'AG'],
+                4: ['R', 'DS', 'AG'],
+            }
+            workflows_1turn = [_default_wf.get(m_star_list[qi], ['R', 'DS', 'AG'])
+                               for qi in range(len(questions))]
 
             with Manager() as manager:
                 tc_list_shared = [convert_to_shared_structure(ctx, manager) for ctx in context_list]
