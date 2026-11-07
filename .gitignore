@@ -95,4 +95,33 @@ wandb_key.txt
 # Project-specific large directories (stored in /data/user_data/jgibson2/)
 checkpoints/
 condor_data/
-baseline/
+
+# baseline/ is tracked, but exclude heavy generated/binary files within it
+baseline/**/__pycache__/
+baseline/**/*.py[cod]
+baseline/**/*.so
+baseline/**/*.dylib
+baseline/**/*.egg-info/
+baseline/**/outputs/
+baseline/**/wandb/
+baseline/**/*.pt
+baseline/**/*.pth
+baseline/**/*.ckpt
+baseline/**/*.safetensors
+baseline/**/*.bin
+baseline/**/*.pkl
+baseline/**/*.pickle
+baseline/**/*.h5
+baseline/**/*.hdf5
+baseline/**/*.npy
+baseline/**/*.npz
+baseline/**/*.parquet
+baseline/**/*.arrow
+baseline/**/*.jsonl.gz
+baseline/**/*.log
+baseline/**/logs/
+baseline/**/*.out
+baseline/**/*.err
+baseline/**/.venv/
+baseline/**/venv/
+baseline/**/.env
